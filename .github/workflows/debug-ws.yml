@@ -1,0 +1,49 @@
+name: debug-ws
+on: push
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install paho-mqtt==2.1.0
+      - run: |
+          mkdir -p /tmp/mosq
+          printf 'listener 1883\nallow_anonymous true\nlistener 9001\nprotocol websockets\nallow_anonymous true\n' > /tmp/mosq/mosquitto.conf
+      - run: docker run -d --name mosq -p 18884:1883 -p 18885:9001 -v /tmp/mosq/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro eclipse-mosquitto:2.0.22
+      - run: sleep 3 && docker logs mosq
+      - run: |
+          python3 - <<'EOF'
+          import time
+          import paho.mqtt.client as mqtt
+          from paho.mqtt.enums import CallbackAPIVersion
+
+          received, events = [], []
+
+          sub = mqtt.Client(CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv5, client_id="bridge-test")
+          def on_conn(c, u, f, rc, p=None):
+              events.append(("conn", str(rc), f"{rc.value if hasattr(rc,'value') else '?'}"))
+              c.subscribe("zigbee2mqtt/#", qos=1)
+              events.append(("subscribed",))
+          def on_disc(c, u, f, rc, p=None):
+              events.append(("disc", str(rc)))
+          def on_msg(c, u, m):
+              received.append((m.topic, m.payload))
+          sub.on_connect, sub.on_message, sub.on_disconnect = on_conn, on_msg, on_disc
+          sub.connect("127.0.0.1", 18884, 30)
+          sub.loop_start()
+          time.sleep(1)
+          print("AFTER CONNECT events:", events, "is_connected:", sub.is_connected(), flush=True)
+
+          pub = mqtt.Client(CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv5, client_id="pub-test")
+          pub.connect("127.0.0.1", 18884, 30)
+          pub.loop_start()
+          time.sleep(0.5)
+          info = pub.publish("zigbee2mqtt/sensor1", b"24.5", qos=1)
+          info.wait_for_publish(timeout=10)
+          print("published rc:", info.rc, flush=True)
+          deadline = time.time() + 5
+          while time.time() < deadline and not received:
+              time.sleep(0.1)
+          print("received:", received, "events:", events, flush=True)
+          EOF
