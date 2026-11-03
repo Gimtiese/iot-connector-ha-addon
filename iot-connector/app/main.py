@@ -44,7 +44,7 @@ class Runtime:
             try:
                 with open(self.options.credentials_path, encoding="utf-8") as fh:
                     self._creds = json.load(fh)
-            except Exception:  # noqa: BLE001 - beschädigte Datei: neu claimen
+            except Exception:  # noqa: BLE001 - beschädigte Datei: neu verknüpfen
                 logger.exception("Gateway-Zugangsdaten unlesbar, neu verknüpfen")
                 self._creds = None
 
@@ -52,15 +52,52 @@ class Runtime:
     def has_credentials(self) -> bool:
         return self._creds is not None
 
+    @property
+    def gateway_name(self) -> str:
+        gateway = (self._creds or {}).get("gateway") or {}
+        return str(gateway.get("name") or "")
+
+    @property
+    def gateway_id(self) -> str:
+        gateway = (self._creds or {}).get("gateway") or {}
+        return str(gateway.get("id") or "")
+
     def save_credentials(self, creds: dict) -> None:
         write_credentials(self.options.credentials_path, creds)
         self._creds = creds
         logger.info("Gateway verknüpft, starte Cloud-Verbindung")
         self._start_cloud()
 
+    def unlink(self) -> None:
+        """Verknüpfung aufheben (#11): Cloud stoppen, Zugangsdaten löschen – Puffer bleibt.
+
+        Der Gegenfall zum Claim: Ein Gateway, das im IoT-Connector gelöscht wurde,
+        kommt mit den alten Zugangsdaten nie wieder rein (CONNACK *Not authorized*).
+        Ohne Entkoppeln war das Add-on tot („Bereits verknüpft“ ohne Ausweg).
+        """
+        if self.cloud:
+            self.cloud.stop()
+        if self.bridge:
+            self.bridge.cloud = None
+        self.cloud = None
+        self._creds = None
+        try:
+            os.remove(self.options.credentials_path)
+        except FileNotFoundError:
+            pass
+        logger.info("Verknüpfung aufgehoben – neuer Claim möglich, Puffer bleibt")
+        self._write_state()
+
     # ── Aufbau ─────────────────────────────────────────────────────────────── #
     def start(self) -> None:
-        """Verbindet den lokalen Broker (Retry-Schleife) und liefert die Bridge."""
+        """Verbindet den lokalen Broker (Retry-Schleife) und liefert die Bridge.
+
+        Reihenfolge: Die Cloud startet VOR dem Supervisor-Zugriff – direkt nach
+        einem Add-on-Update ist der Supervisor oft noch beschäftigt, und die
+        Cloud-Verbindung darf davon nicht abhängen (#11: „nach dem Update weg“).
+        """
+        if self._creds:
+            self._start_cloud()
         local = local_mqtt_credentials()
         client = make_local_client(
             local["host"], local["port"], local["username"], local["password"]
@@ -92,8 +129,6 @@ class Runtime:
                     time.sleep(30)
 
         threading.Thread(target=_connect_loop, daemon=True).start()
-        if self._creds:
-            self._start_cloud()
         logger.info(
             "Add-on läuft (Filter: %s, Puffergrenze: %s)",
             self.options.topic_filters,
@@ -116,27 +151,47 @@ class Runtime:
         self._write_state()
 
     def _start_cloud(self) -> None:
+        """Startet die Cloud-Verbindung einmalig – idempotent (#11).
+
+        Die Supervisor-Retry-Schleife ruft ``start()`` wiederholt auf, solange
+        der Supervisor nach einem Add-on-Update noch nicht antwortet. Ohne
+        Wächter entstünde dabei pro Retry ein weiterer Cloud-Client mit
+        derselben Client-ID – die Verbindungen treten sich gegenseitig vom
+        Broker, und die Cloud-Verbindung flackert (wahrscheinliche Ursache
+        des „nach dem Update weg“).
+        """
+        if self.cloud is not None:
+            return
         assert self._creds
         broker_url = self._creds.get("broker_url") or self.options.cloud_broker_url
-        self.cloud = CloudClient(
-            broker_url=broker_url,
-            username=self._creds["username"],
-            password=self._creds["password"],
-            client_id=self._creds["clientid"],
-            topic_prefix=self._creds["topic_prefix"],
-            store=self.store,
-            on_state_change=self._write_state,
-        )
-        if self.bridge:
-            self.bridge.attach_cloud(self.cloud)
-        self.cloud.start()
+        try:
+            self.cloud = CloudClient(
+                broker_url=broker_url,
+                username=self._creds["username"],
+                password=self._creds["password"],
+                client_id=self._creds["clientid"],
+                topic_prefix=self._creds["topic_prefix"],
+                store=self.store,
+                on_state_change=self._write_state,
+            )
+            if self.bridge:
+                self.bridge.attach_cloud(self.cloud)
+            self.cloud.start()
+        except Exception:  # noqa: BLE001 - Add-on bleibt lauffähig, Puffer aktiv
+            logger.exception("Cloud-Verbindung nicht startbar (broker_url %s)", broker_url)
         self._write_state()
 
     # ── Status für die UI ──────────────────────────────────────────────────── #
     def status(self) -> dict:
+        # cloud_error: Letzter CONNACK-Fehler des Cloud-Brokers (None, wenn nie
+        # verbunden wurde bzw. nach Erfolg). Die UI leitet daraus den Hinweis
+        # „Gateway im IoT-Connector gelöscht oder getrennt“ ab (#11).
         return {
             "claimed": self.has_credentials(),
+            "gateway_name": self.gateway_name,
+            "gateway_id": self.gateway_id,
             "cloud_connected": bool(self.cloud and self.cloud.connected),
+            "cloud_error": (self.cloud.last_error if self.cloud else None),
             "local_connected": self.local_connected,
             "buffered": self.store.count(),
             "dropped": self.store.dropped(),

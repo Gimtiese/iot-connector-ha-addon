@@ -69,6 +69,11 @@ class CloudClient:
         self._pending_lock = threading.Lock()
         self.connected = False
         self.last_publish: float | None = None
+        # Letzter CONNACK-Fehler (z. B. nach Löschungen im IoT-Connector) –
+        # die UI zeigt daraus den Hinweis „neu verknüpfen“ (#11)
+        self.last_error: str | None = None
+        # Grund einmalig loggen, nicht bei jedem Retry (paho wiederholt endlos)
+        self._logged_error: str | None = None
 
         host, port, tls, path = parse_ws_url(broker_url)
         self._client = mqtt.Client(
@@ -112,10 +117,18 @@ class CloudClient:
                 logger.exception("Status-Hook fehlgeschlagen")
 
     # ── paho-Callbacks ─────────────────────────────────────────────────────── #
+    # CONNACK-Codes, die bedeuten: Diese Zugangsdaten werden nie akzeptiert –
+    # z. B. weil das Gateway im IoT-Connector gelöscht oder getrennt wurde (#11).
+    # Temporäre Codes (z. B. Server nicht bereit) behandeln wir nicht als Auth-Fehler.
+    _AUTH_REASON_CODES = {4, 5, 134, 135}
+
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
         # MQTT5-ReasonCode: 0 = Success (paho 2.1 hat kein reason_code.is_success)
-        self.connected = getattr(reason_code, "value", 0) == 0
+        value = getattr(reason_code, "value", 0)
+        self.connected = value == 0
         if self.connected:
+            self.last_error = None
+            self._logged_error = None
             logger.info(
                 "Cloud verbunden, liefere %s gepufferte Nachrichten nach", self._store.count()
             )
@@ -124,7 +137,19 @@ class CloudClient:
             # laufen, sonst werden PUBLISH/PUBACK nie geschrieben/gelesen
             threading.Thread(target=self._drain, daemon=True).start()
         else:
-            logger.warning("Cloud verbindet nicht: %s", reason_code)
+            # paho verbindet nach jedem abgelehnten CONNACK erneut – der Grund
+            # gehört ins Protokoll, aber nur einmal pro Störung, nicht pro Retry
+            reason = f"{reason_code}" if value not in (0,) else "unbekannt"
+            self.last_error = reason
+            if reason != self._logged_error:
+                self._logged_error = reason
+                logger.error(
+                    "Cloud verbindet nicht (CONNACK %s) – Zugangsdaten ungültig"
+                    " oder Broker-Störung; paho wiederholt, der Puffer bleibt aktiv",
+                    reason,
+                )
+            if value in self._AUTH_REASON_CODES:
+                self._notify()
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties=None) -> None:
         was = self.connected

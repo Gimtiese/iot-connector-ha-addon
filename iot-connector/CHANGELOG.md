@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.3 (2026-11-03)
+
+Fix: Nach dem Update auf 1.1.2 „Cloud getrennt“ ohne Ausweg – Claim verweigert mit „Bereits verknüpft“ (iot-connector-ha-addon#11).
+
+- **Ursache des festgefahrenen Zustands:** Die Claim-Box wurde immer angezeigt – auch bei bestehender Verknüpfung. Nach einem Verbindungsverlust (z. B. Update-Neustart oder Backend-Neustart) sah das wie „bitte neu verknüpfen“ aus. Wer dann das Gateway im IoT-Connector löschte, kam mit den alten Zugangsdaten nie wieder rein (CONNACK *Not authorized*) – und ein neuer Claim wurde abgelehnt („Bereits verknüpft“), weil `gateway.json` noch da war. Einziger Ausweg: Deinstallieren (verliert `/data` inkl. Puffer)
+- **Cloud startet jetzt vor dem Supervisor-Zugriff:** `_start_cloud()` läuft in `Runtime.start()` vor `local_mqtt_credentials()` – direkt nach einem Add-on-Update ist der Supervisor oft noch beschäftigt, und die Cloud-Verbindung darf nicht hinter der lokalen Broker-Verbindung stehen bleiben. Zusätzlich fängt `_start_cloud()` alle Fehler ab: Ein Cloud-Start-fehler legt nie mehr die lokale Bridge lahm
+- **UI zeigt den Klartext-Zustand:** Claim-Formular nur solange nicht verknüpft. Verknüpft: Gateway-Karte mit Name/ID, Cloud-Status und „Verknüpfung aufheben“ (mit Bestätigung). Das Formular verschwindet aus der Ansicht, wenn `claimed: true`
+- **„Verknüpfung aufheben“ (neu, `POST /api/unlink`):** Stoppt den Cloud-Client, trennt ihn von der Bridge und löscht `gateway.json` – der SQLite-Puffer bleibt vollständig erhalten. Danach ist ein neuer Claim sofort möglich
+- **CONNACK-Grund in UI und Protokoll:** Lehnt der Cloud-Broker die Zugangsdaten dauerhaft ab (4/5/134/135, z. B. gelöschtes Gateway), zeigt die UI „Gateway im IoT-Connector gelöscht oder getrennt – neu verknüpfen“ mit dem Weg dorthin. Der Grund wird einmalig pro Störung geloggt statt bei jedem Retry (paho wiederholt endlos mit Backoff)
+- **`api/status`:** Neue Felder `gateway_name`, `gateway_id`, `cloud_error` (letzter CONNACK-Fehler)
+- **Claim-409:** „Bereits verknüpft – zuerst ‚Verknüpfung aufheben‘, dann den neuen Code eingeben“ – der Weg ist jetzt in der Meldung
+- **Tests:** `tests/test_restart_unlink.py` deckt den Neustart mit vorhandener `gateway.json` (Cloud startet ohne neuen Claim), das Entkoppeln (Credentials weg, Puffer bleibt) und die WebUI-Handler (Unlink, Claim-409, Status) ab
+
 ## 1.1.2 (2026-11-03)
 
 Fix: Claim-Code wird nicht angenommen – Fehlermeldungen unterscheiden jetzt die Ursache (iot-connector-ha-addon#9).
