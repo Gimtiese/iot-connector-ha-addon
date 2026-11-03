@@ -55,7 +55,6 @@ class Bridge:
         import time
 
         try:
-            print(f"BRIDGE-DBG: on_message {msg.topic}", flush=True)
             if not is_allowed(msg.topic, self._filters):
                 return  # Allowlist: alles andere bleibt lokal
             self.messages_forwarded += 1
@@ -69,7 +68,13 @@ class Bridge:
             logger.exception("Weiterleiten von %s fehlgeschlagen", msg.topic)
 
 
-def make_local_client(host: str, port: int, username: str | None, password: str | None):
+def make_local_client(
+    host: str,
+    port: int,
+    username: str | None,
+    password: str | None,
+    client_id: str = "iot-connector-bridge",
+):
     """MQTT-5-Client für den lokalen Broker (nur Subscribe, niemals Publish).
 
     Noch nicht verbunden: Der Aufrufer setzt erst ``on_connect`` (Subscribe)
@@ -77,7 +82,7 @@ def make_local_client(host: str, port: int, username: str | None, password: str 
     """
     client = mqtt.Client(
         callback_api_version=CallbackAPIVersion.VERSION2,
-        client_id="iot-connector-bridge",
+        client_id=client_id,
         protocol=mqtt.MQTTv5,
     )
     if username:

@@ -79,7 +79,10 @@ def _wait_mosquitto(port: int, transport: str = "tcp", timeout_s: float = 60.0) 
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         probe = mqtt_lib.Client(
-            CallbackAPIVersion.VERSION2, protocol=mqtt_lib.MQTTv311, transport=transport
+            CallbackAPIVersion.VERSION2,
+            protocol=mqtt_lib.MQTTv311,
+            transport=transport,
+            client_id=f"addon-test-probe-{next(_N)}",
         )
         try:
             probe.connect("127.0.0.1", port, 30)
@@ -102,7 +105,10 @@ def _wait_for(predicate, timeout_s: float = 20.0, interval: float = 0.2) -> bool
 def _cloud_subscriber(ws_port: int, received: list) -> mqtt.Client:
     """Abonniert die Cloud (als wäre es der Ingest) und sammelt Nachrichten."""
     client = mqtt.Client(
-        CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv5, transport="websockets"
+        CallbackAPIVersion.VERSION2,
+        protocol=mqtt.MQTTv5,
+        transport="websockets",
+        client_id=f"addon-test-ingest-{next(_N)}",
     )
 
     def on_message(c, u, m):
@@ -136,28 +142,30 @@ def brokers():
             )
 
 
-_DBG: list = []
+_N = iter(range(1000))
 
 
 def _publisher(port: int) -> mqtt.Client:
-    pub = mqtt.Client(CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv5)
+    pub = mqtt.Client(
+        CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv5, client_id=f"addon-test-pub-{next(_N)}"
+    )
     pub.connect("127.0.0.1", port, 30)
     pub.loop_start()
-    _DBG.append(("pub", pub.is_connected()))
     return pub
 
 
 def _local_bridge(local_tcp: int, cloud, store, filters) -> mqtt.Client:
-    local = make_local_client("127.0.0.1", local_tcp, None, None)
+    local = make_local_client(
+        "127.0.0.1", local_tcp, None, None, client_id=f"iot-connector-bridge-{next(_N)}"
+    )
     bridge = Bridge(local, cloud, filters, store)
     bridge.start()  # setzt on_message
-    _DBG.append(("bridge-made", local_tcp))
     # on_connect VOR connect: sonst verpasst der Client den CONNACK (kein Subscribe)
-    def _dbg_on_connect(c, u, f, r, p=None):
-        print(f"BRIDGE-DBG: on_connect {r}", flush=True)
+    def _on_connect(c, u, f, r, p=None):
         for f in filters:
             c.subscribe(f, qos=1)
-    local.on_connect = _dbg_on_connect
+
+    local.on_connect = _on_connect
     local.connect("127.0.0.1", local_tcp, 30)
     local.loop_start()
     return local
@@ -178,16 +186,6 @@ class TestEndeZuEnde:
         pub = _publisher(brokers["local_tcp"])
         pub.publish("zigbee2mqtt/sensor1", b"24.5", qos=1)
 
-        def dbg():
-            print(
-                f"DBG: local={local.is_connected()} pub={pub.is_connected()} "
-                f"cloud={cloud.connected} store={store.count()} dbg={_DBG}",
-                flush=True,
-            )
-        dbg()
-        import time as _t
-        _t.sleep(2)
-        dbg()
         assert _wait_for(
             lambda: any(
                 t == "d/gw-test/zigbee2mqtt/sensor1" and p == b"24.5" for t, p in received
@@ -239,9 +237,6 @@ class TestEndeZuEnde:
 
         pub = _publisher(brokers["local_tcp"])
         pub.publish("zigbee2mqtt/sensor2", b"11.5", qos=1)
-        import time as _t
-        _t.sleep(2)
-        print(f"DBG t3: local={local.is_connected()} pub={_DBG} store={store.count()}", flush=True)
         assert _wait_for(lambda: store.count() == 1, timeout_s=15), (
             "Nachricht muss ohne Cloud im Puffer liegen"
         )

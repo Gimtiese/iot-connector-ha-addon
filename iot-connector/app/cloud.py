@@ -4,6 +4,8 @@
 - Keepalive 30 s (≤ 60 s laut Spezifikation)
 - Zugangsdaten aus dem Claim (iot-connector#122) – Client-ID und Username kommen
   vom Backend, niemals aus manuellen Einstellungen
+- Store-and-Forward: Gesendet wird ausschließlich, was im Puffer liegt; eine
+  Zeile verschwindet erst nach dem PUBACK (at-least-once)
 """
 
 from __future__ import annotations
@@ -18,6 +20,8 @@ import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.properties import Properties
+
+from .mapping import cloud_topic, is_valid_topic
 
 KEEPALIVE_S = 30
 
@@ -54,7 +58,9 @@ class CloudClient:
         self._topic_prefix = topic_prefix
         self._store = store
         self._on_state_change = on_state_change
-        self._pending: dict[int, int] = {}  # mid → row_id (PUBACK aussteht)
+        # mid → row_id (PUBACK ausstehend) und row_ids in Zustellung
+        self._pending: dict[int, int] = {}
+        self._inflight: set[int] = set()
         self._pending_lock = threading.Lock()
         self.connected = False
         self.last_publish: float | None = None
@@ -86,6 +92,7 @@ class CloudClient:
         self._client.loop_start()
 
     def stop(self) -> None:
+        self.connected = False
         self._client.loop_stop()
         try:
             self._client.disconnect()
@@ -104,13 +111,13 @@ class CloudClient:
         # MQTT5-ReasonCode: 0 = Success (paho 2.1 hat kein reason_code.is_success)
         self.connected = getattr(reason_code, "value", 0) == 0
         if self.connected:
-            print(f"CLOUD-DBG: verbunden, replay von {self._store.count()}", flush=True)
+            logger.info(
+                "Cloud verbunden, liefere %s gepufferte Nachrichten nach", self._store.count()
+            )
             self._notify()
-            try:
-                self.replay()
-            except Exception as exc:
-                print(f"CLOUD-DBG: replay fehlgeschlagen: {exc!r}", flush=True)
-                raise
+            # Nachliefern im eigenen Thread: Der Netzwerk-Thread muss weiter
+            # laufen, sonst werden PUBLISH/PUBACK nie geschrieben/gelesen
+            threading.Thread(target=self._drain, daemon=True).start()
         else:
             logger.warning("Cloud verbindet nicht: %s", reason_code)
 
@@ -118,13 +125,16 @@ class CloudClient:
         was = self.connected
         self.connected = False
         with self._pending_lock:
-            self._pending.clear()  # unbestätigte bleiben im Puffer (at-least-once)
+            self._pending.clear()
+            self._inflight.clear()  # unbestätigte bleiben im Puffer (at-least-once)
         if was:
             self._notify()
 
     def _on_publish(self, client, userdata, mid, reason_code=None, properties=None) -> None:
         with self._pending_lock:
             row_id = self._pending.pop(mid, None)
+            if row_id is not None:
+                self._inflight.discard(row_id)
         if row_id is not None:
             self._store.remove(row_id)  # erst nach PUBACK weg aus dem Puffer
 
@@ -135,17 +145,13 @@ class CloudClient:
         props.UserProperty = [("ts", f"{ts:.3f}")]
         return props
 
-    def publish_row(self, row_id: int, topic: str, payload: bytes, ts: float) -> bool:
-        """Sendet eine bereits gepufferte Nachricht (QoS 1, User-Property ``ts``).
+    def _publish_row(self, row_id: int, topic: str, payload: bytes, ts: float) -> bool:
+        """Sendet eine gepufferte Zeile (QoS 1, User-Property ``ts``).
 
         Returns:
-            True, wenn gesendet wurde (PUBACK entfernt die Zeile). False: die
-            Zeile bleibt im Puffer und wird mit ``replay`` nachgeliefert.
+            True, wenn das PUBLISH abgeschickt wurde. Die Zeile bleibt so lange
+            im Puffer, bis der PUBACK sie entfernt – at-least-once.
         """
-        from .mapping import cloud_topic, is_valid_topic
-
-        if not self.connected:
-            return False
         full = cloud_topic(self._topic_prefix, topic)
         if not is_valid_topic(full):
             self._store.remove(row_id)
@@ -157,39 +163,40 @@ class CloudClient:
             retain=False,
             properties=self._ts_property(ts),
         )
-        print(f"CLOUD-DBG: publish_row mid={info.mid} rc={info.rc} topic={full}", flush=True)
         with self._pending_lock:
             self._pending[info.mid] = row_id
+            self._inflight.add(row_id)
         self.last_publish = time.time()
         return True
 
-    def replay(self) -> None:
-        """Nachliefern: älteste Zeilen zuerst, in Batches, bis der Puffer leer ist."""
-        from .mapping import cloud_topic, is_valid_topic
+    def publish_row(self, row_id: int, topic: str, payload: bytes, ts: float) -> bool:
+        """Sendet eine bereits gepufferte Nachricht, wenn die Cloud verbunden ist."""
+        if not self.connected:
+            return False
+        return self._publish_row(row_id, topic, payload, ts)
 
-        print(f"CLOUD-DBG: replay start, connected={self.connected}", flush=True)
+    def _drain(self) -> None:
+        """Nachliefern: älteste Zeilen zuerst, bis der Puffer leer ist.
+
+        Läuft im eigenen Thread. Bereits zustellende Zeilen (PUBACK ausstehend)
+        werden übersprungen – keine endlose Wiederholung, solange der
+        Netzwerk-Thread die Bestätigungen verarbeitet.
+        """
         while self.connected:
             batch = self._store.next_batch(500)
-            print(f"CLOUD-DBG: batch {len(batch)}", flush=True)
             if not batch:
-                return
-            for row_id, topic, payload, ts in batch:
+                return  # Puffer leer
+            with self._pending_lock:
+                todo = [row for row in batch if row[0] not in self._inflight]
+            if not todo:
+                time.sleep(0.1)  # alles unterwegs – PUBACKs abwarten
+                continue
+            for row_id, topic, payload, ts in todo:
                 if not self.connected:
                     return  # Rest bleibt gepuffert
-                full = cloud_topic(self._topic_prefix, topic)
-                if not is_valid_topic(full):
-                    self._store.remove(row_id)
-                    continue
-                info = self._client.publish(
-                    full,
-                    payload=payload,
-                    qos=1,
-                    retain=False,
-                    properties=self._ts_property(ts),
-                )
-                with self._pending_lock:
-                    self._pending[info.mid] = row_id
-                print(f"CLOUD-DBG: published mid={info.mid} rc={info.rc}", flush=True)
-            self.last_publish = time.time()
-            # PUBACKs laufen im Netzwerk-Thread; kurzes Felder vermeidet Busy-Loop
+                try:
+                    self._publish_row(row_id, topic, payload, ts)
+                except Exception:  # noqa: BLE001 - Rest bleibt gepuffert
+                    logger.exception("Nachliefern von %s fehlgeschlagen", topic)
+                    return
             time.sleep(0.05)

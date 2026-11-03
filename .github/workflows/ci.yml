@@ -26,7 +26,7 @@ jobs:
       - name: Unit-Tests (Allowlist, Puffer, Mapping)
         run: env -u DATABASE_URL pytest tests/test_mapping.py tests/test_store.py
       - name: Integrationstest gegen lokale Mosquitto-Container
-        run: env -u DATABASE_URL pytest -s tests/test_integration_mosquitto.py
+        run: env -u DATABASE_URL pytest tests/test_integration_mosquitto.py
   build:
     # Image-Build für beide Architekturen – kein Push, nur prüfen
     runs-on: ubuntu-latest
