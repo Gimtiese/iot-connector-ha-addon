@@ -22,13 +22,22 @@ from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.properties import Properties
 
 from .mapping import cloud_topic, is_valid_topic
+from .rate_limit import TokenBucket
 
 KEEPALIVE_S = 30
-# Nachliefern gedrosselt: kleine Batches mit Pause, damit retained-Bursts beim
-# Start (z. B. Discovery unter homeassistant/…) Tenant-Ratenlimits nicht reißen
-# (iot-connector#117). Puffergröße begrenzt zusätzlich.
+# Nachliefern: Batch-Größe begrenzt nur die SQLite-Lesemenge. Die tatsächliche
+# Senderate regelt der Token-Bucket (iot-connector-ha-addon#15): 3000 msg/min
+# im Tenant-Ingest sind 50/s, Standard 40/s inklusive Live-Verkehr.
 DRAIN_BATCH = 200
-DRAIN_PAUSE_S = 0.1
+DRAIN_IDLE_S = 0.2
+# Live-Nachrichten bekommen Vorrang: der Drain lässt einen Token Reserve und
+# blockiert beim Publish höchstens kurz auf einen freien Token.
+LIVE_RESERVE = 1.0
+LIVE_SEND_TIMEOUT_S = 1.0
+# Reconnect-Sturm begrenzen (989 Verbindungen in 4 min, GIM-119): paho wartet
+# mindestens 2 s, höchstens 120 s zwischen Verbindungsversuchen.
+RECONNECT_MIN_S = 2
+RECONNECT_MAX_S = 120
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +64,8 @@ class CloudClient:
         topic_prefix: str,
         store,  # MessageStore
         on_state_change=None,
+        max_send_rate: float | None = None,
+        token_bucket: TokenBucket | None = None,
     ) -> None:
         self._broker_url = broker_url
         self._username = username
@@ -67,6 +78,16 @@ class CloudClient:
         self._pending: dict[int, int] = {}
         self._inflight: set[int] = set()
         self._pending_lock = threading.Lock()
+        # Ein Budget für Live + Nachliefern (Token pro Publish).
+        from .config import DEFAULT_MAX_SEND_RATE
+
+        self._bucket = token_bucket or TokenBucket(max_send_rate or DEFAULT_MAX_SEND_RATE)
+        self._stats_lock = threading.Lock()
+        self.live_deferred = 0
+        self.puback_errors = 0
+        self._stop = threading.Event()
+        self._drain_thread: threading.Thread | None = None
+        self._started = False
         self.connected = False
         self.last_publish: float | None = None
         # Letzter CONNACK-Fehler (z. B. nach Löschungen im IoT-Connector) –
@@ -88,6 +109,13 @@ class CloudClient:
         self._client.ws_set_options(path=path)
         if username:
             self._client.username_pw_set(username, password)
+        # Reconnect-Sturm begrenzen (GIM-119: 989 Verbindungen in 4 min):
+        # paho wartet exponentiell zwischen 2 s und 120 s. Zusätzlich begrenzen
+        # wir Inflight/Queue, damit ein großer Puffer nicht im RAM des
+        # Netzwerk-Threads landet – der Rest bleibt in SQLite.
+        self._client.reconnect_delay_set(min_delay=RECONNECT_MIN_S, max_delay=RECONNECT_MAX_S)
+        self._client.max_inflight_messages_set(20)
+        self._client.max_queued_messages_set(1000)
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
         self._client.on_publish = self._on_publish
@@ -95,19 +123,39 @@ class CloudClient:
 
     # ── Verbindung ────────────────────────────────────────────────────────── #
     def start(self) -> None:
-        logger.info("Cloud-Verbindung zu %s (ws-path %s)", self._broker_url, self._path)
+        if self._started:
+            return  # idempotent: kein zweiter Netzwerk-Thread, keine zweite Client-ID
+        self._started = True
+        self._stop.clear()
+        logger.info(
+            "Cloud-Verbindung zu %s (ws-path %s, max %s msg/s)",
+            self._broker_url,
+            self._path,
+            self._bucket.rate,
+        )
         # connect_async + loop_start: paho verbindet neu, solange die Cloud nicht
         # erreichbar ist – Nachrichten bleiben derweil im Puffer
         self._client.connect_async(self._host, self._port, KEEPALIVE_S)
         self._client.loop_start()
+        # Persistenter Drain: läuft auch über Reconnects hinweg und sendet nur,
+        # solange connected ist. Verhindert doppelte Drain-Threads pro CONNACK.
+        self._drain_thread = threading.Thread(
+            target=self._drain, daemon=True, name="cloud-drain"
+        )
+        self._drain_thread.start()
 
     def stop(self) -> None:
         self.connected = False
+        self._stop.set()
         self._client.loop_stop()
         try:
             self._client.disconnect()
         except Exception:  # noqa: BLE001 - Stoppen muss immer klappen
             pass
+        thread = self._drain_thread
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+        self._started = False
 
     def _notify(self) -> None:
         if self._on_state_change:
@@ -133,9 +181,8 @@ class CloudClient:
                 "Cloud verbunden, liefere %s gepufferte Nachrichten nach", self._store.count()
             )
             self._notify()
-            # Nachliefern im eigenen Thread: Der Netzwerk-Thread muss weiter
-            # laufen, sonst werden PUBLISH/PUBACK nie geschrieben/gelesen
-            threading.Thread(target=self._drain, daemon=True).start()
+            # Der Drain-Thread läuft seit ``start()`` dauerhaft und wird hier
+            # nicht erneut gestartet (keine Doppel-Threads pro Reconnect).
         else:
             # paho verbindet nach jedem abgelehnten CONNACK erneut – der Grund
             # gehört ins Protokoll, aber nur einmal pro Störung, nicht pro Retry
@@ -157,7 +204,13 @@ class CloudClient:
         with self._pending_lock:
             self._pending.clear()
             self._inflight.clear()  # unbestätigte bleiben im Puffer (at-least-once)
+        # Grund ins Protokoll (GIM-119: Reconnect-Sturm warum?) – aber nicht
+        # bei jedem regulären Stop, only wenn die Verbindung tatsächlich stand.
         if was:
+            logger.warning(
+                "Cloud getrennt (reason=%s) – Puffer bleibt, paho verbindet mit Backoff neu",
+                reason_code,
+            )
             self._notify()
 
     def _on_publish(self, client, userdata, mid, reason_code=None, properties=None) -> None:
@@ -165,6 +218,13 @@ class CloudClient:
             row_id = self._pending.pop(mid, None)
             if row_id is not None:
                 self._inflight.discard(row_id)
+        value = getattr(reason_code, "value", reason_code)
+        if value not in (None, 0):
+            # PUBACK mit Fehlergrund: Der Broker hat die Nachricht nicht
+            # angenommen. Sichtbar machen, statt still zu verwerfen.
+            with self._stats_lock:
+                self.puback_errors += 1
+            logger.warning("PUBACK mit Fehlergrund %s für row_id=%s", value, row_id)
         if row_id is not None:
             self._store.remove(row_id)  # erst nach PUBACK weg aus dem Puffer
 
@@ -184,6 +244,7 @@ class CloudClient:
         """
         full = cloud_topic(self._topic_prefix, topic)
         if not is_valid_topic(full):
+            logger.warning("Ungültiges Cloud-Topic für row_id=%s: %s – verworfen", row_id, full)
             self._store.remove(row_id)
             return False
         info = self._client.publish(
@@ -193,6 +254,15 @@ class CloudClient:
             retain=False,
             properties=self._ts_property(ts),
         )
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            # Nicht angenommen (Queue voll/Verbindung weg): Zeile bleibt im
+            # Puffer und wird später erneut versucht – kein stiller Verlust.
+            logger.warning(
+                "Publish für row_id=%s nicht angenommen (rc=%s) – bleibt gepuffert",
+                row_id,
+                info.rc,
+            )
+            return False
         with self._pending_lock:
             self._pending[info.mid] = row_id
             self._inflight.add(row_id)
@@ -200,33 +270,58 @@ class CloudClient:
         return True
 
     def publish_row(self, row_id: int, topic: str, payload: bytes, ts: float) -> bool:
-        """Sendet eine bereits gepufferte Nachricht, wenn die Cloud verbunden ist."""
+        """Sendet eine bereits gepufferte Live-Nachricht, wenn die Cloud verbunden ist.
+
+        Live hat Vorrang: Der Token-Bucket wird mit kurzem Timeout blockiert,
+        der Drain lässt dagegen einen Token Reserve. Reicht das Budget nicht,
+        bleibt die Zeile im Puffer und wird nachgeliefert.
+        """
         if not self.connected:
+            return False
+        if not self._bucket.acquire(timeout=LIVE_SEND_TIMEOUT_S):
+            with self._stats_lock:
+                self.live_deferred += 1
+            logger.debug("Live-Budget erschöpft – row_id=%s bleibt gepuffert", row_id)
             return False
         return self._publish_row(row_id, topic, payload, ts)
 
     def _drain(self) -> None:
-        """Nachliefern: älteste Zeilen zuerst, bis der Puffer leer ist.
+        """Nachliefern: dauerhaft, gedrosselt über den Token-Bucket.
 
-        Läuft im eigenen Thread. Bereits zustellende Zeilen (PUBACK ausstehend)
-        werden übersprungen – keine endlose Wiederholung, solange der
-        Netzwerk-Thread die Bestätigungen verarbeitet.
+        Läuft ab ``start()`` und über Reconnects hinweg. Bereits zustellende
+        Zeilen (PUBACK ausstehend) werden übersprungen. Nachliefern nimmt nur
+        freie Tokens und lässt ``LIVE_RESERVE`` für Live-Nachrichten.
         """
-        while self.connected:
-            batch = self._store.next_batch(DRAIN_BATCH)
-            if not batch:
-                return  # Puffer leer
-            with self._pending_lock:
-                todo = [row for row in batch if row[0] not in self._inflight]
-            if not todo:
-                time.sleep(0.1)  # alles unterwegs – PUBACKs abwarten
+        while not self._stop.is_set():
+            if not self.connected:
+                self._stop.wait(DRAIN_IDLE_S)
                 continue
-            for row_id, topic, payload, ts in todo:
-                if not self.connected:
-                    return  # Rest bleibt gepuffert
-                try:
-                    self._publish_row(row_id, topic, payload, ts)
-                except Exception:  # noqa: BLE001 - Rest bleibt gepuffert
-                    logger.exception("Nachliefern von %s fehlgeschlagen", topic)
-                    return
-            time.sleep(DRAIN_PAUSE_S)
+            if not self._drain_once():
+                self._stop.wait(DRAIN_IDLE_S)
+
+    def _drain_once(self) -> bool:
+        """Ein Durchlauf über den ältesten Batch. ``False`` heißt: Puffer leer."""
+        batch = self._store.next_batch(DRAIN_BATCH)
+        if not batch:
+            return False
+        with self._pending_lock:
+            todo = [row for row in batch if row[0] not in self._inflight]
+        if not todo:
+            # Alles in Zustellung: kurz warten, damit PUBACKs ankommen können,
+            # ohne den Thread in einer Busy-Loop zu drehen.
+            self._bucket.sleep(0.05)
+            return True
+        for row_id, topic, payload, ts in todo:
+            if self._stop.is_set() or not self.connected:
+                return True  # Rest bleibt gepuffert
+            if not self._bucket.try_acquire(reserve=LIVE_RESERVE):
+                # Kein Budget: kurz warten, dann Verbindung/Queue neu prüfen.
+                wait = self._bucket.wait_seconds(reserve=LIVE_RESERVE)
+                self._bucket.sleep(min(max(wait, 0.001), DRAIN_IDLE_S))
+                return True
+            try:
+                self._publish_row(row_id, topic, payload, ts)
+            except Exception:  # noqa: BLE001 - Rest bleibt gepuffert
+                logger.exception("Nachliefern von %s fehlgeschlagen", topic)
+                return True
+        return True

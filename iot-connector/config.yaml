@@ -1,6 +1,6 @@
 # HAOS-Add-on: lokalen Mosquitto nur lesend in den IoT-Connector spiegeln (iot-connector#129, ADR 0001)
 name: IoT Connector Bridge
-version: "1.1.4"
+version: "1.1.5"
 slug: iot_connector_bridge
 description: >-
   Spiegelt Topics des lokalen Mosquitto nur lesend in den IoT-Connector
@@ -35,6 +35,9 @@ options:
   topic_filters: []
   # Store-and-Forward: Puffergröße in Nachrichten. Mehr: älteste werden verworfen
   buffer_max_messages: 50000
+  # Senderate zum Cloud-Broker in Nachrichten/Sekunde. Tenant-Ingest erlaubt
+  # 3000/min = 50/s; 40/s lässt Luft für Live-Verkehr (iot-connector-ha-addon#15).
+  max_send_rate: 40.0
   # Cloud (Übersteuerung nur für Tests – Default kommt aus dem Claim)
   backend_url: https://iot-connector.gimtiese-tech.de
   cloud_broker_url: wss://iot-connector-mqtt.gimtiese-tech.de
@@ -42,5 +45,6 @@ schema:
   topic_filters:
     - str
   buffer_max_messages: int(100,10000000)
+  max_send_rate: float(1,1000)
   backend_url: str?
   cloud_broker_url: str?

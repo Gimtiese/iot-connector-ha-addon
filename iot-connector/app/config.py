@@ -14,12 +14,16 @@ DEFAULT_TOPIC_FILTERS = ["#"]
 LEGACY_DEFAULT_TOPIC_FILTERS = ["zigbee2mqtt/#", "shellies/#"]
 DEFAULT_BACKEND_URL = "https://iot-connector.gimtiese-tech.de"
 DEFAULT_CLOUD_BROKER_URL = "wss://iot-connector-mqtt.gimtiese-tech.de"
+# Tenant-Ingest: 3000 Nachrichten/Minute = 50/s. 40/s lässt 20 % Luft und
+# deckt Live-Verkehr mit ab (iot-connector-ha-addon#15).
+DEFAULT_MAX_SEND_RATE = 40.0
 
 
 @dataclass(frozen=True)
 class Options:
     topic_filters: list[str] = field(default_factory=lambda: list(DEFAULT_TOPIC_FILTERS))
     buffer_max_messages: int = 50000
+    max_send_rate: float = DEFAULT_MAX_SEND_RATE
     backend_url: str = DEFAULT_BACKEND_URL
     cloud_broker_url: str = DEFAULT_CLOUD_BROKER_URL
     data_dir: str = "/data"
@@ -55,6 +59,7 @@ def _normalize_filters(raw: object) -> list[str]:
 def load_options() -> Options:
     """Liest /data/options.json (HAOS) und lässt Env-Variablen (Tests) übersteuern."""
     buffer_max = 50000
+    max_send_rate = DEFAULT_MAX_SEND_RATE
     backend = DEFAULT_BACKEND_URL
     cloud = DEFAULT_CLOUD_BROKER_URL
     topic_filters = list(DEFAULT_TOPIC_FILTERS)
@@ -63,11 +68,13 @@ def load_options() -> Options:
         raw = json.load(open(options_file, encoding="utf-8"))
         topic_filters = _normalize_filters(raw.get("topic_filters"))
         buffer_max = int(raw.get("buffer_max_messages") or buffer_max)
+        max_send_rate = float(raw.get("max_send_rate") or max_send_rate)
         backend = raw.get("backend_url") or backend
         cloud = raw.get("cloud_broker_url") or cloud
     return Options(
         topic_filters=topic_filters,
         buffer_max_messages=max(100, int(os.environ.get("BUFFER_MAX_MESSAGES", buffer_max))),
+        max_send_rate=max(1.0, float(os.environ.get("MAX_SEND_RATE", max_send_rate))),
         backend_url=os.environ.get("BACKEND_URL", backend),
         cloud_broker_url=os.environ.get("CLOUD_BROKER_URL", cloud),
         data_dir=os.environ.get("ADDON_DATA_DIR", "/data"),
