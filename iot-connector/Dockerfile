@@ -5,7 +5,7 @@ FROM ${BUILD_FROM}
 RUN apk add --no-cache bash
 
 COPY rootfs/ /
-RUN chmod a+x /run.sh /ingress.sh
+RUN chmod a+x /run.sh
 
 WORKDIR /app
 COPY app/requirements.txt /app/requirements.txt
