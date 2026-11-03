@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.1 (2026-11-03)
+
+Fix: Add-on erscheint nach dem Hinzufügen des Repos nicht im HA-Store (iot-connector-ha-addon#5).
+
+- **Ursache:** `config.yaml` war gegen das echte Supervisor-Schema invalide – der Supervisor verwirft das Add-on beim Laden des Repos still. `panel_ingress` (existiert nicht, korrekt ist `panel_title`/`panel_icon`) und `privileged: false` (muss eine Liste von Capabilities sein, nicht Bool) sind raus bzw. ersetzt
+- **Belegt mit dem echten Supervisor-Validator** (home-assistant/supervisor, Tag 2025.06.0, `SCHEMA_ADDON_CONFIG`/`SCHEMA_REPOSITORY_CONFIG`): beide Dateien validieren jetzt OK
+- **Architekturen geprüft:** aarch64 + amd64 im `config.yaml`, passend zu `build.yaml` (Raspberry Pi 4 = aarch64, Intel/AMD = amd64)
+- **CI:** neuer Job `schema`, der `config.yaml`/`repository.yaml` gegen das Supervisor-Schema (gepinntes Tag) validiert – künftige Inkompatibilitäten fallen vor dem Merge auf
+
 ## 1.1.0 (2026-11-03)
 
 Default: alle MQTT-Topics übertragen, `topic_filters` optional (iot-connector-ha-addon#3).
