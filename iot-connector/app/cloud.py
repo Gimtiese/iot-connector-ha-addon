@@ -24,6 +24,11 @@ from paho.mqtt.properties import Properties
 from .mapping import cloud_topic, is_valid_topic
 
 KEEPALIVE_S = 30
+# Nachliefern gedrosselt: kleine Batches mit Pause, damit retained-Bursts beim
+# Start (z. B. Discovery unter homeassistant/…) Tenant-Ratenlimits nicht reißen
+# (iot-connector#117). Puffergröße begrenzt zusätzlich.
+DRAIN_BATCH = 200
+DRAIN_PAUSE_S = 0.1
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +188,7 @@ class CloudClient:
         Netzwerk-Thread die Bestätigungen verarbeitet.
         """
         while self.connected:
-            batch = self._store.next_batch(500)
+            batch = self._store.next_batch(DRAIN_BATCH)
             if not batch:
                 return  # Puffer leer
             with self._pending_lock:
@@ -199,4 +204,4 @@ class CloudClient:
                 except Exception:  # noqa: BLE001 - Rest bleibt gepuffert
                     logger.exception("Nachliefern von %s fehlgeschlagen", topic)
                     return
-            time.sleep(0.05)
+            time.sleep(DRAIN_PAUSE_S)

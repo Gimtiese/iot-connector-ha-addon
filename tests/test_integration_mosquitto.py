@@ -201,6 +201,73 @@ class TestEndeZuEnde:
         cloud_sub.disconnect()
         store.close()
 
+    def test_default_spiegelt_alle_topics_inkl_homeassistant(self, brokers, tmp_path):
+        """Default `#`: alles wird gespiegelt, auch `homeassistant/#` (#3)."""
+        received: list = []
+        cloud_sub = _cloud_subscriber(brokers["cloud_ws"], received)
+        store = MessageStore(str(tmp_path / "b.sqlite"), 10000)
+        cloud = CloudClient(
+            f"ws://127.0.0.1:{brokers['cloud_ws']}/", "gw-test", "pw", "gw-t3", PREFIX, store
+        )
+        cloud.start()
+        local = _local_bridge(brokers["local_tcp"], cloud, store, ["#"])
+
+        pub = _publisher(brokers["local_tcp"])
+        pub.publish("homeassistant/sensor/x/config", b"{}", qos=1)
+        pub.publish("tasmota/tele/x", b"{}", qos=1)
+
+        assert _wait_for(
+            lambda: any(
+                t == "d/gw-test/homeassistant/sensor/x/config" and p == b"{}"
+                for t, p in received
+            )
+        ), f"homeassistant/# muss im Default gespiegelt werden: {received}"
+        assert _wait_for(
+            lambda: any(t == "d/gw-test/tasmota/tele/x" for t, _p in received)
+        ), f"Beliebiges Topic muss gespiegelt werden: {received}"
+
+        pub.loop_stop()
+        pub.disconnect()
+        local.loop_stop()
+        local.disconnect()
+        cloud.stop()
+        cloud_sub.loop_stop()
+        cloud_sub.disconnect()
+        store.close()
+
+    def test_retained_beim_start_gedrosselt_nachgeliefert(self, brokers, tmp_path):
+        """Retained-Burst (z. B. Discovery) beim Subscribe: alles in die Cloud,
+        Verbindung reißt nicht ab (#3, Quotas iot-connector#117)."""
+        n_retained = 40
+        pub = _publisher(brokers["local_tcp"])
+        for i in range(n_retained):
+            pub.publish(f"homeassistant/sensor/r{i}/config", b"{}", qos=1, retain=True)
+
+        received: list = []
+        cloud_sub = _cloud_subscriber(brokers["cloud_ws"], received)
+        store = MessageStore(str(tmp_path / "b.sqlite"), 100000)
+        cloud = CloudClient(
+            f"ws://127.0.0.1:{brokers['cloud_ws']}/", "gw-test", "pw", "gw-t4", PREFIX, store
+        )
+        cloud.start()
+        local = _local_bridge(brokers["local_tcp"], cloud, store, ["#"])
+
+        assert _wait_for(
+            lambda: len([1 for t, _p in received if "/sensor/r" in t]) == n_retained,
+            timeout_s=60,
+        ), f"Retained nicht vollständig nachgeliefert: {len(received)}/{n_retained}"
+        assert cloud.connected, "Cloud-Verbindung muss nach dem Retained-Burst bestehen"
+        assert _wait_for(lambda: store.count() == 0, timeout_s=30), "Puffer nicht geleert"
+
+        pub.loop_stop()
+        pub.disconnect()
+        local.loop_stop()
+        local.disconnect()
+        cloud.stop()
+        cloud_sub.loop_stop()
+        cloud_sub.disconnect()
+        store.close()
+
     def test_nicht_allowlisted_topic_bleibt_lokal(self, brokers, tmp_path):
         """homeassistant/# steht nicht in der Allowlist → nichts in der Cloud."""
         received: list = []

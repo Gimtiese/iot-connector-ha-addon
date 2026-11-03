@@ -1,4 +1,7 @@
-"""Bridge: abonniert lokal (nur lesend) und spiegelt Allowlist-Topics in die Cloud.
+"""Bridge: abonniert lokal (nur lesend) und spiegelt die gefilterten Topics in die Cloud.
+
+Default ohne `topic_filters`: `#`, also alle Topics (Issue #3). Gesetzte Filter
+wirken als Allowlist.
 
 Pufferung gehört zur Bridge: Jede erlaubte Nachricht landet immer zuerst im
 Store-and-Forward-Puffer (SQLite); die Cloud sendet ausschließlich gepufferte

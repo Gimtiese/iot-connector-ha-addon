@@ -14,8 +14,14 @@ def topic_matches(pattern: str, topic: str) -> bool:
 
     ``sport/#`` matcht auch ``sport`` selbst (MQTT-Spezifikation) – '#' zählt
     die Elternebene mit.
+
+    Topics, die mit '$' beginnen (z. B. ``$SYS/…``), matcht kein Filter, der
+    mit einem Wildcard beginnt (MQTT-Spezifikation 4.7.2): '``#``' spiegelt
+    damit niemals Broker-Statistik.
     """
     p, t = _levels(pattern), _levels(topic)
+    if t and t[0].startswith("$") and p and p[0] in ("#", "+"):
+        return False
     if p and p[-1] == "#":
         p = p[:-1]
         return len(t) >= len(p) and all(
