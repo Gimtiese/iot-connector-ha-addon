@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.5 (2026-11-03)
+
+Fix: Nachliefern sprengte das Tenant-Ratenlimit, der Backend-Ingest verwarf still nach dem PUBACK (iot-connector-ha-addon#15).
+
+- **Senderate begrenzt:** Token-Bucket statt fester 200er-Batches mit 0,1 s Pause. Standard **40 Nachrichten/s** inklusive Live-Verkehr (Tenant-Limit 3000/min = 50/s), über die neue Option `max_send_rate` einstellbar. Ein 50.000-Nachrichten-Puffer wird damit gedrosselt nachgeliefert, ohne `rate_limited` im Backend auszulösen. Test simuliert die 50.000 Zeilen mit einer virtuellen Uhr.
+- **Live vor Nachliefern:** Live-Nachrichten laufen im selben Budget, der Drain lässt aber einen Token Reserve. Reicht das Budget nicht, bleibt die Zeile im Puffer statt verloren zu gehen.
+- **Reconnect-Sturm begrenzt (GIM-119):** paho wartet explizit 2–120 s zwischen Verbindungsversuchen (989 Verbindungen in 4 min im Ops-Check). Zusätzlich ist `start()` idempotent, der Drain läuft als einzelner persistenter Thread statt pro CONNACK neu – keine doppelten Client-IDs/Threads mehr. Disconnect-Grund wird geloggt.
+- **Kein stiller Verlust mehr:** `PUBLISH` mit `rc != 0` bleibt im Puffer (Retry statt Drop), ungültige Cloud-Topics und PUBACK-Fehlergründe werden geloggt/gezählt. Inflight/Queue sind begrenzt (20/1000), der Rest bleibt in SQLite.
+- **UI/Status:** `api/status` liefert zusätzlich `max_send_rate`, `live_deferred` und `puback_errors`.
+- **Tests:** `tests/test_rate_limit.py` deckt Burst/Refill, Reserve, Timeout, 50.000-Nachrichten-Drain und Live-Vorrang ab.
+
 ## 1.1.4 (2026-11-03)
 
 Fix: Nach einem Add-on-Neustart „Cloud verbunden“, das Gateway im IoT-Connector aber offline – neue Nachrichten kamen im Ingest nie an (iot-connector-ha-addon#13).

@@ -179,6 +179,7 @@ class Runtime:
                 topic_prefix=self._creds["topic_prefix"],
                 store=self.store,
                 on_state_change=self._write_state,
+                max_send_rate=self.options.max_send_rate,
             )
             if self.bridge:
                 self.bridge.attach_cloud(self.cloud)
@@ -203,6 +204,9 @@ class Runtime:
             "dropped": self.store.dropped(),
             "last_publish": (self.cloud.last_publish if self.cloud else None),
             "messages_forwarded": (self.bridge.messages_forwarded if self.bridge else 0),
+            "max_send_rate": self.options.max_send_rate,
+            "live_deferred": (self.cloud.live_deferred if self.cloud else 0),
+            "puback_errors": (self.cloud.puback_errors if self.cloud else 0),
         }
 
     def _write_state(self, *_args) -> None:

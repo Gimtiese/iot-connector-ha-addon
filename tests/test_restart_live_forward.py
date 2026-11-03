@@ -36,11 +36,13 @@ class FakeCloud:
     """Ersatz für CloudClient: zeichnet ``publish_row`` auf (#13)."""
 
     def __init__(self, *, broker_url, username, password, client_id,
-                 topic_prefix, store, on_state_change=None) -> None:
+                 topic_prefix, store, on_state_change=None, max_send_rate=None) -> None:
         self.published: list[tuple[int, str, bytes]] = []
         self.connected = False
         self.last_error = None
         self.last_publish = None
+        self.live_deferred = 0
+        self.puback_errors = 0
         self.started = False
 
     def start(self) -> None:

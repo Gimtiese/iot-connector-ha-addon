@@ -44,7 +44,7 @@ class FakeCloud:
     lastconstructed: list[dict] = []
 
     def __init__(self, *, broker_url, username, password, client_id, topic_prefix,
-                 store, on_state_change=None) -> None:
+                 store, on_state_change=None, max_send_rate=None) -> None:
         self.args = {
             "broker_url": broker_url, "username": username, "client_id": client_id,
             "topic_prefix": topic_prefix,
@@ -54,6 +54,8 @@ class FakeCloud:
         self.stopped = False
         self.connected = False
         self.last_error = None
+        self.live_deferred = 0
+        self.puback_errors = 0
         FakeCloud.lastconstructed.append(self.args)
 
     def start(self) -> None:
