@@ -113,6 +113,12 @@ class Runtime:
             store=self.store,
             on_message=self._write_state,
         )
+        # Reihenfolge Cloud-vor-Supervisor (#11) hat die Cloud schon gestartet,
+        # bevor es eine Bridge gab – ``_start_cloud`` konnte sie nicht attachen.
+        # Ohne attach blieb ``bridge.cloud`` None: Nach einem Neustart wurden
+        # neue Nachrichten nur gepuffert und nie gesendet (iot-connector-ha-addon#13).
+        if self.cloud:
+            self.bridge.attach_cloud(self.cloud)
         self.bridge.start()
 
         def _connect_loop() -> None:

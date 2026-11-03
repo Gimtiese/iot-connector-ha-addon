@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -66,3 +67,57 @@ class TestInternausfall:
         original = time.time() - 3600  # Nachricht von vor einer Stunde
         store.add("zigbee2mqtt/s0", b"1", ts=original)
         assert store.next_batch(1)[0][3] == original
+
+
+class TestThreadSicherheit:
+    """#13: ``count()``/``oldest_ts()`` lieferten ohne Lock ``None`` → TypeError."""
+
+    def test_paralleles_add_count_und_remove(self, tmp_path) -> None:
+        store = MessageStore(str(tmp_path / "race.sqlite"), max_messages=10_000)
+        errors: list[Exception] = []
+
+        def adder(n: int) -> None:
+            try:
+                for i in range(n):
+                    store.add(f"t/{threading.current_thread().name}/{i}", b"x")
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        def reader(n: int) -> None:
+            try:
+                for _ in range(n):
+                    store.count()
+                    store.oldest_ts()
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [threading.Thread(target=adder, args=(200,)) for _ in range(4)]
+        threads += [threading.Thread(target=reader, args=(200,)) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Race recreatet: {errors}"
+        assert store.count() == 800
+
+        # Entfernen parallel zu Reads: FIFO-Zeilen einzeln weg, Puffer am Ende leer
+        ids = [r[0] for r in store.next_batch(1000)]
+
+        def remover(chunk: list[int]) -> None:
+            try:
+                for row_id in chunk:
+                    store.remove(row_id)
+                    store.count()
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        rm_threads = [threading.Thread(target=remover, args=(ids[i::4],)) for i in range(4)]
+        for t in rm_threads:
+            t.start()
+        for t in rm_threads:
+            t.join()
+        assert not errors, f"Race recreatet: {errors}"
+        assert store.count() == 0
+        assert store.oldest_ts() is None
+        store.close()

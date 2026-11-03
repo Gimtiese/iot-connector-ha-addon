@@ -13,7 +13,7 @@ from aiohttp import web
 
 logger = logging.getLogger(__name__)
 
-_ADDON_VERSION = "1.1.3"
+_ADDON_VERSION = "1.1.4"
 
 _PAGE = """<!doctype html>
 <html lang="de"><head><meta charset="utf-8">
@@ -54,27 +54,45 @@ _PAGE = """<!doctype html>
 <script>
 const AUTH_HINT = 'Gateway im IoT-Connector gelöscht oder getrennt – ' +
  'hier „Verknüpfung aufheben“ und danach neu verknüpfen.';
+let prevBuffered = null;
+function ago(s){
+  if(s==null) return '–';
+  const d = (Date.now()/1000 - s);
+  if(d < 60) return Math.round(d)+' s';
+  if(d < 3600) return Math.round(d/60)+' min';
+  return Math.round(d/3600)+' h';
+}
 async function refresh(){
- const s = await (await fetch('api/status')).json();
- // Claim-Formular nur, solange nicht verknüpft (#11) – sonst Gateway-Karte
- document.getElementById('claimbox').style.display = s.claimed ? 'none' : '';
- document.getElementById('gwbox').style.display = s.claimed ? '' : 'none';
- document.getElementById('gwname').textContent = s.gateway_name || '(unbenannt)';
- document.getElementById('gwid').textContent = s.gateway_id ? 'ID '+s.gateway_id : '';
- const cm = document.getElementById('cloudmsg');
- if(s.cloud_connected){cm.className='ok'; cm.textContent='Cloud verbunden.';}
- else if(s.claimed && s.cloud_error){cm.className='err';
-  cm.textContent='Cloud getrennt ('+s.cloud_error+'). '+AUTH_HINT;}
- else if(s.claimed){cm.className='muted';
-  cm.textContent='Cloud getrennt – neue Verbindung wird aufgebaut (Puffer aktiv).';}
- else{cm.className='muted'; cm.textContent='Nicht verknüpft.';}
- const rows = [['Cloud', s.cloud_connected?'verbunden':'getrennt (Puffer aktiv)'],
-  ['Lokaler Broker', s.local_connected?'verbunden':'getrennt'],
-  ['Puffer', s.buffered+' Nachrichten'],
-  ['Verworfen (Puffergrenze)', s.dropped],
-  ['Letzte Übertragung', s.last_publish?new Date(s.last_publish*1000).toLocaleString():'–']];
- document.querySelector('#status tbody').innerHTML =
-  rows.map(r=>'<tr><td class="muted">'+r[0]+'</td><td>'+r[1]+'</td></tr>').join('');
+  const s = await (await fetch('api/status')).json();
+  // Claim-Formular nur, solange nicht verknüpft (#11) – sonst Gateway-Karte
+  document.getElementById('claimbox').style.display = s.claimed ? 'none' : '';
+  document.getElementById('gwbox').style.display = s.claimed ? '' : 'none';
+  document.getElementById('gwname').textContent = s.gateway_name || '(unbenannt)';
+  document.getElementById('gwid').textContent = s.gateway_id ? 'ID '+s.gateway_id : '';
+  const cm = document.getElementById('cloudmsg');
+  if(s.cloud_connected && s.last_publish){cm.className='ok';
+   cm.textContent='Cloud verbunden, letzte Übertragung vor '+ago(s.last_publish)+'.';}
+  else if(s.cloud_connected){cm.className='muted';
+   cm.textContent='Cloud verbunden – noch keine Übertragung bestätigt (Puffer aktiv).';}
+  else if(s.claimed && s.cloud_error){cm.className='err';
+   cm.textContent='Cloud getrennt ('+s.cloud_error+'). '+AUTH_HINT;}
+  else if(s.claimed){cm.className='muted';
+   cm.textContent='Cloud getrennt – neue Verbindung wird aufgebaut (Puffer aktiv).';}
+  else{cm.className='muted'; cm.textContent='Nicht verknüpft.';}
+  // Pufferstand steigt → deutliche Warnung (#13): sonst „verbunden“ trotz
+  // steigendem Puffer der Illusion „alles wird übertragen“.
+  const rising = prevBuffered!=null && s.buffered > prevBuffered;
+  prevBuffered = s.buffered;
+  const bufCell = '<td class="'+(rising?'err':'')+'">'+
+   s.buffered+' Nachrichten'+(rising?' ⚠ steigt':'')+'</td>';
+  const rows = [['Cloud', s.cloud_connected?'verbunden':'getrennt (Puffer aktiv)'],
+   ['Lokaler Broker', s.local_connected?'verbunden':'getrennt'],
+   ['Puffer', null],
+   ['Verworfen (Puffergrenze)', s.dropped],
+   ['Letzte Übertragung', s.last_publish?('vor '+ago(s.last_publish)):'–']];
+  document.querySelector('#status tbody').innerHTML =
+   rows.map(r=>'<tr><td class="muted">'+r[0]+'</td><td>'+
+   (r[0]==='Puffer'?bufCell:r[1])+'</td></tr>').join('');
 }
 async function claim(e){
  e.preventDefault();
