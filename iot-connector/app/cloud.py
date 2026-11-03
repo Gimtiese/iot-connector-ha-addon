@@ -101,7 +101,8 @@ class CloudClient:
 
     # ── paho-Callbacks ─────────────────────────────────────────────────────── #
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
-        self.connected = reason_code.is_success
+        # MQTT5-ReasonCode: 0 = Success (paho 2.1 hat kein reason_code.is_success)
+        self.connected = getattr(reason_code, "value", 0) == 0
         if self.connected:
             logger.info(
                 "Cloud verbunden, liefere %s gepufferte Nachrichten nach", self._store.count()

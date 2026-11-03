@@ -68,15 +68,26 @@ def _start_mosquitto(name: str, conf_port: tuple[int, int]) -> tuple[int, int]:
     return tcp_port, ws_port
 
 
-def _wait_mosquitto(port: int, timeout_s: float = 60.0) -> None:
+def _wait_mosquitto(port: int, transport: str = "tcp", timeout_s: float = 60.0) -> None:
+    """Wartet auf einen echten CONNACK – TCP-Connect genügt nicht.
+
+    docker-proxy nimmt Verbindungen an, bevor Mosquitto lauscht; erst ein
+    MQTT-CONNECT/CONNACK beweist, dass der Broker Datenverarbeitung kann.
+    """
+    import paho.mqtt.client as mqtt_lib
+
     deadline = time.time() + timeout_s
     while time.time() < deadline:
+        probe = mqtt_lib.Client(
+            CallbackAPIVersion.VERSION2, protocol=mqtt_lib.MQTTv311, transport=transport
+        )
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=2):
-                return
-        except OSError:
+            probe.connect("127.0.0.1", port, 30)
+            probe.disconnect()
+            return
+        except Exception:  # noqa: BLE001 - Broker noch nicht bereit
             time.sleep(0.5)
-    raise TimeoutError(f"Mosquitto auf Port {port} nicht erreichbar")
+    raise TimeoutError(f"Mosquitto auf Port {port} nicht bereit (kein CONNACK)")
 
 
 def _wait_for(predicate, timeout_s: float = 20.0, interval: float = 0.2) -> bool:
@@ -116,7 +127,7 @@ def brokers():
     _start_mosquitto("addon-test-cloud", (cloud_tcp2, cloud_ws))
     try:
         _wait_mosquitto(local_tcp)
-        _wait_mosquitto(cloud_ws)
+        _wait_mosquitto(cloud_ws, transport="websockets")
         yield {"local_tcp": local_tcp, "cloud_ws": cloud_ws}
     finally:
         for name in ("addon-test-local", "addon-test-cloud"):
@@ -208,8 +219,9 @@ class TestEndeZuEnde:
 
         pub = _publisher(brokers["local_tcp"])
         pub.publish("zigbee2mqtt/sensor2", b"11.5", qos=1)
-        time.sleep(1)
-        assert store.count() == 1, "Nachricht muss ohne Cloud im Puffer liegen"
+        assert _wait_for(lambda: store.count() == 1, timeout_s=15), (
+            "Nachricht muss ohne Cloud im Puffer liegen"
+        )
 
         received: list = []
         cloud_sub = _cloud_subscriber(brokers["cloud_ws"], received)
