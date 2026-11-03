@@ -60,11 +60,13 @@ class Runtime:
 
     # ── Aufbau ─────────────────────────────────────────────────────────────── #
     def start(self) -> None:
-        """Verbindet den lokalen Broker (Retry über paho) und liefert die Bridge."""
+        """Verbindet den lokalen Broker (Retry-Schleife) und liefert die Bridge."""
         local = local_mqtt_credentials()
         client = make_local_client(
             local["host"], local["port"], local["username"], local["password"]
         )
+        # on_connect VOR connect: Subscribe gehört in den CONNACK-Callback,
+        # sonst verpasst der Client die erste Verbindung
         client.on_connect = self._on_local_connect
         self.bridge = Bridge(
             client,
@@ -74,9 +76,21 @@ class Runtime:
             on_message=self._write_state,
         )
         self.bridge.start()
-        threading.Thread(
-            target=client.loop_forever, kwargs={"retry_first_connection": True}, daemon=True
-        ).start()
+
+        def _connect_loop() -> None:
+            import time
+
+            while True:
+                try:
+                    client.connect(local["host"], local["port"], 30)
+                    # loop_forever: paho verbindet nach Abbrüchen selbst neu
+                    client.loop_forever(retry_first_connection=True)
+                    return
+                except Exception as exc:  # noqa: BLE001 - Add-on bleibt ansprechbar
+                    logger.error("Lokaler Broker nicht verbindbar: %s – Retry in 30 s", exc)
+                    time.sleep(30)
+
+        threading.Thread(target=_connect_loop, daemon=True).start()
         if self._creds:
             self._start_cloud()
         logger.info(

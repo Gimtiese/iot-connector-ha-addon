@@ -69,7 +69,11 @@ class Bridge:
 
 
 def make_local_client(host: str, port: int, username: str | None, password: str | None):
-    """MQTT-5-Client für den lokalen Broker (nur Subscribe, niemals Publish)."""
+    """MQTT-5-Client für den lokalen Broker (nur Subscribe, niemals Publish).
+
+    Noch nicht verbunden: Der Aufrufer setzt erst ``on_connect`` (Subscribe)
+    und ruft dann ``connect`` auf – sonst geht der CONNACK-Callback verloren.
+    """
     client = mqtt.Client(
         callback_api_version=CallbackAPIVersion.VERSION2,
         client_id="iot-connector-bridge",
@@ -77,5 +81,4 @@ def make_local_client(host: str, port: int, username: str | None, password: str 
     )
     if username:
         client.username_pw_set(username, password)
-    client.connect(host, port, keepalive=30)
     return client
