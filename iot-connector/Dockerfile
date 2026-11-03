@@ -1,8 +1,8 @@
 ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
-# Bash/io für Healthcheck und Basis-Debugging
-RUN apk add --no-cache bash io
+# Bash für die Add-on-Shell (im Basis-Image enthalten, explizit für Debugging)
+RUN apk add --no-cache bash
 
 COPY rootfs/ /
 RUN chmod a+x /run.sh /ingress.sh
