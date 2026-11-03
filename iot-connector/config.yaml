@@ -23,15 +23,12 @@ host_network: false
 usb: false
 privileged: false
 full_access: false
-apparmor: disable
 startup: services
 boot: auto
 init: false
 
-# Add-on-Datenverzeichnis: Zugangsdaten, SQLite-Puffer, Status
-map:
-  - share:ro
-  - config:ro
+# /data ist immer gemappt (Zugangsdaten, SQLite-Puffer, Status) –
+# weitere map:-Einträge brauchen wir nicht, das Add-on soll minimal berechtigt sein.
 options:
   # MQTT-Filter (Wildcards wie in MQTT) – nur diese Topics werden abonniert
   topic_filters:

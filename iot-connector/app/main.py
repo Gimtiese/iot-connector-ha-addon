@@ -68,6 +68,7 @@ class Runtime:
         # on_connect VOR connect: Subscribe gehört in den CONNACK-Callback,
         # sonst verpasst der Client die erste Verbindung
         client.on_connect = self._on_local_connect
+        client.on_disconnect = self._on_local_disconnect
         self.bridge = Bridge(
             client,
             cloud=None,
@@ -104,6 +105,14 @@ class Runtime:
         for f in self.options.topic_filters:
             client.subscribe(f, qos=1)
         logger.info("Lokaler Broker verbunden, abonniere %s", self.options.topic_filters)
+        self._write_state()
+
+    def _on_local_disconnect(
+        self, client, userdata, disconnect_flags, reason_code, properties=None
+    ) -> None:
+        # Ohne diesen Callback bliebe die UI nach einem Broker-Abbruch auf "verbunden"
+        self.local_connected = False
+        logger.warning("Lokaler Broker getrennt (%s) – paho verbindet neu", reason_code)
         self._write_state()
 
     def _start_cloud(self) -> None:

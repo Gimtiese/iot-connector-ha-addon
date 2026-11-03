@@ -13,6 +13,10 @@ RUN pip3 install --no-cache-dir -r /app/requirements.txt
 
 COPY app/ /app/
 
+# HAOS startet das Basis-Image nur mit ENTRYPOINT /init (s6-overlay v3) –
+# ohne CMD würde die App nie gestartet (init: false, kein s6-Dienst).
+CMD [ "/run.sh" ]
+
 LABEL io.hass.type="addon" \
       io.hass.arch="aarch64|amd64" \
       org.opencontainers.image.source="https://github.com/Gimtiese/iot-connector-ha-addon"
