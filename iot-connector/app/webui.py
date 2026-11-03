@@ -153,19 +153,31 @@ def _claim_http_error(exc: urllib.error.HTTPError) -> ClaimError:
     detail = _error_detail(exc)
     logger.warning("Claim fehlgeschlagen: HTTP %s %s", status, detail or exc.reason)
     if status == 400:
-        msg = "Code ungültig oder abgelaufen. Codes gelten 15 Minuten und nur einmal – ggf. im IoT-Connector neu erzeugen."
+        msg = (
+            "Code ungültig oder abgelaufen. Codes gelten 15 Minuten und nur einmal – "
+            "ggf. im IoT-Connector neu erzeugen."
+        )
     elif status == 403:
         msg = "Vom Cloudflare-Schutz geblockt (403) – bitte dem Support melden."
     elif status == 429:
-        msg = "Zu viele Versuche – der Server erlaubt 5 Versuche pro Minute. Bitte ~1 Minute warten und erneut versuchen."
+        msg = (
+            "Zu viele Versuche – der Server erlaubt 5 Versuche pro Minute. "
+            "Bitte ~1 Minute warten und erneut versuchen."
+        )
     elif status == 503:
-        msg = "Server-/Konfigurationsfehler (503): MQTT-Zugänge sind im Connector nicht konfiguriert. Support informieren."
+        msg = (
+            "Server-/Konfigurationsfehler (503): MQTT-Zugänge sind im Connector "
+            "nicht konfiguriert. Support informieren."
+        )
     elif status == 502:
-        msg = "Server-/Konfigurationsfehler (502): der Cloud-Broker hat abgelehnt. Support informieren."
+        msg = (
+            "Server-/Konfigurationsfehler (502): der Cloud-Broker hat abgelehnt. "
+            "Support informieren."
+        )
     elif status == 422:
         msg = f"Ungültige Anfrage (422) an den Server{': ' + detail if detail else ''}."
     elif status >= 500:
-        msg = f"Serverfehler ({status}){': ' + detail if detail else ''} – bitte dem Support melden."
+        msg = f"Serverfehler ({status}){': ' + detail if detail else ''} – bitte dem Support melden."  # noqa: E501
     else:
         msg = f"Fehlgeschlagen (HTTP {status}){': ' + detail if detail else ''}."
     return ClaimError(msg)
