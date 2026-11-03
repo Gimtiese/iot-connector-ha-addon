@@ -13,6 +13,8 @@ from aiohttp import web
 
 logger = logging.getLogger(__name__)
 
+_ADDON_VERSION = "1.1.2"
+
 _PAGE = """<!doctype html>
 <html lang="de"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -117,23 +119,90 @@ class WebUI:
 
 
 class ClaimError(RuntimeError):
-    """Claim fehlgeschlagen – Code ungültig, abgelaufen oder Backend nicht erreichbar."""
+    """Claim fehlgeschlagen – Code ungültig, abgelaufen, Backend-Limit oder Backend-Fehler."""
+
+
+def normalize_claim_code(raw: str) -> str:
+    """Bringt die Eingabe in die kanonische Form (groß, ohne Leerzeichen/Bindestriche).
+
+    Tolerant wie das Backend (``normalize_code``): ``abcd 1234`` und ``abcd-1234``
+    werden zu ``ABCD1234``. Alles andere (zu kurz, falsches Alphabet) bleibt
+    unverändert – das Backend lehnt es dann mit 400 ab.
+    """
+    return "".join(raw.split()).replace("-", "").upper()
+
+
+def _error_detail(exc: urllib.error.HTTPError) -> str:
+    """Extrahiert ``detail`` aus dem Fehler-Body, falls das Backend ihn schickt."""
+    try:
+        body = json.loads(exc.read().decode("utf-8", errors="replace"))
+    except Exception:  # noqa: BLE001
+        return ""
+    detail = body.get("detail") if isinstance(body, dict) else None
+    return str(detail) if isinstance(detail, str) else ""
+
+
+def _claim_http_error(exc: urllib.error.HTTPError) -> ClaimError:
+    """Übersetzt den HTTP-Status des Backends in eine unterscheidbare Meldung (#9).
+
+    Vorher stand hier für jeden HTTPError pauschal „Code ungültig oder
+    abgelaufen." – 429 (Rate-Limit), 503 (MQTT-Zugänge nicht konfiguriert) und
+    echte 5xx waren davon nicht zu unterscheiden.
+    """
+    status = exc.code
+    detail = _error_detail(exc)
+    logger.warning("Claim fehlgeschlagen: HTTP %s %s", status, detail or exc.reason)
+    if status == 400:
+        msg = (
+            "Code ungültig oder abgelaufen. Codes gelten 15 Minuten und nur einmal – "
+            "ggf. im IoT-Connector neu erzeugen."
+        )
+    elif status == 403:
+        msg = "Vom Cloudflare-Schutz geblockt (403) – bitte dem Support melden."
+    elif status == 429:
+        msg = (
+            "Zu viele Versuche – der Server erlaubt 5 Versuche pro Minute. "
+            "Bitte ~1 Minute warten und erneut versuchen."
+        )
+    elif status == 503:
+        msg = (
+            "Server-/Konfigurationsfehler (503): MQTT-Zugänge sind im Connector "
+            "nicht konfiguriert. Support informieren."
+        )
+    elif status == 502:
+        msg = (
+            "Server-/Konfigurationsfehler (502): der Cloud-Broker hat abgelehnt. "
+            "Support informieren."
+        )
+    elif status == 422:
+        msg = f"Ungültige Anfrage (422) an den Server{': ' + detail if detail else ''}."
+    elif status >= 500:
+        msg = f"Serverfehler ({status}){': ' + detail if detail else ''} – bitte dem Support melden."  # noqa: E501
+    else:
+        msg = f"Fehlgeschlagen (HTTP {status}){': ' + detail if detail else ''}."
+    return ClaimError(msg)
 
 
 def claim_gateway(backend_url: str, code: str) -> dict:
     """Löst den Claim-Code beim Backend ein (iot-connector#122: ohne Login, einmalig)."""
+    code = normalize_claim_code(code)
     url = backend_url.rstrip("/") + "/api/v1/gateways/claim"
     req = urllib.request.Request(
         url,
         data=json.dumps({"code": code}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            # Cloudflare blockt den Default-UA "Python-urllib/x" mit 403 (error 1010) –
+            # das Add-on kommt sonst nie bis zum Backend (#9, echte Ursache des Reports)
+            "User-Agent": f"IoTConnectorBridge/{_ADDON_VERSION}",
+        },
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.load(resp)
     except urllib.error.HTTPError as exc:
-        raise ClaimError("Code ungültig oder abgelaufen.") from exc
+        raise _claim_http_error(exc) from exc
     except Exception as exc:  # noqa: BLE001
         raise ClaimError(f"Backend nicht erreichbar: {exc}") from exc
 

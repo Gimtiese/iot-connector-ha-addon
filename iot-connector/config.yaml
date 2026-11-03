@@ -1,6 +1,6 @@
 # HAOS-Add-on: lokalen Mosquitto nur lesend in den IoT-Connector spiegeln (iot-connector#129, ADR 0001)
 name: IoT Connector Bridge
-version: "1.1.1"
+version: "1.1.2"
 slug: iot_connector_bridge
 description: >-
   Spiegelt Topics des lokalen Mosquitto nur lesend in den IoT-Connector

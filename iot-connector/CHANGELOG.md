@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.2 (2026-11-03)
+
+Fix: Claim-Code wird nicht angenommen – Fehlermeldungen unterscheiden jetzt die Ursache (iot-connector-ha-addon#9).
+
+- **Ursache gegen die Produktion gefunden:** Das Add-on 1.1.1 schickt `urllib` mit Default-User-Agent `Python-urllib/3.x` – **Cloudflare blockt genau den mit 403 (error 1010, „banned browser signature“)**. Das Backend wurde nie erreicht; die UI zeigte pauschal „Code ungültig oder abgelaufen.“ Das Backend selbst ist gesund (`/health` ok, 400 für ungültige Codes, DynSec konfiguriert – `redeem()` prüft DynSec vor dem Code und antwortet nicht mit 503). Fix: Das Add-on meldet sich als `IoTConnectorBridge/1.1.2` – damit kommt die Anfrage durch (verifiziert gegen die Produktion: `400` statt `403`)
+- **Fehler-Mapping:** `claim_gateway()` übersetzt jetzt den HTTP-Status in eigene Meldungen – 400 (ungültig/abgelaufen, mit Hinweis TTL/einmalig), 403 (Cloudflare-Block), 429 (Rate-Limit), 503 (MQTT-Zugänge nicht konfiguriert), 502 (Broker abgelehnt), 422 (Schemafehler) und 5xx (Serverfehler). Vorher stand für jeden HTTP-Fehler pauschal „Code ungültig oder abgelaufen."
+- **Backend-`detail` durchreichen:** Der Text aus der Backend-Antwort steht in der UI und im Add-on-Log (`Claim fehlgeschlagen: HTTP <status> <detail>`)
+- **Code normalisieren:** Leerzeichen, Bindestriche und Groß-/Kleinschreibung werden vor dem Senden vereinheitlicht (wie das Backend)
+- **Tests:** `tests/test_claim_errors.py` deckt das Status-Mapping (400/429/503/422/500) und die Normalisierung ab
+
 ## 1.1.1 (2026-11-03)
 
 Fix: Add-on erscheint nach dem Hinzufügen des Repos nicht im HA-Store (iot-connector-ha-addon#5).
