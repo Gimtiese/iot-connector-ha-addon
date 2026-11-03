@@ -1,6 +1,6 @@
 # HAOS-Add-on: lokalen Mosquitto nur lesend in den IoT-Connector spiegeln (iot-connector#129, ADR 0001)
 name: IoT Connector Bridge
-version: "1.1.0"
+version: "1.1.1"
 slug: iot_connector_bridge
 description: >-
   Spiegelt Topics des lokalen Mosquitto nur lesend in den IoT-Connector
@@ -14,14 +14,14 @@ services: ["mqtt:need"]
 # Ingress-UI: Claim-Code eingeben, Status, letzte Übertragung, Puffergröße
 ingress: true
 ingress_port: 8099
-panel_ingress: IoT Connector
+panel_title: IoT Connector
+panel_icon: mdi:cloud-upload-outline
 
 # Nur lesend: kein Zugriff auf den Broker außer über mqtt:need, keine Hardware
 hassio_api: false
 homeassistant_api: false
 host_network: false
 usb: false
-privileged: false
 full_access: false
 startup: services
 boot: auto

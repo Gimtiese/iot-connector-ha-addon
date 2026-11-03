@@ -6,6 +6,22 @@ on:
   pull_request:
 
 jobs:
+  schema:
+    # Add-on-Config gegen das echte Supervisor-Schema validieren – invalide
+    # Add-ons erscheinen sonst still nicht im HA-Store (iot-connector-ha-addon#5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          git clone --depth 1 --branch 2025.06.0 \
+            https://github.com/home-assistant/supervisor /tmp/supervisor
+          pip install $(grep -v '^faust-cchardet' /tmp/supervisor/requirements.txt)
+          # aiodns 3.5.0 (Supervisor-Pin) ist mit pycares 5.x inkompatibel
+          pip install pycares==4.9.0
+          python scripts/validate_addon_schema.py /tmp/supervisor
   lint:
     runs-on: ubuntu-latest
     steps:
