@@ -1,0 +1,17 @@
+[project]
+name = "iot-connector-ha-addon"
+version = "1.0.0"
+description = "HAOS-Add-on: spiegelt den lokalen Mosquitto nur lesend in den IoT-Connector"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: braucht Docker/Mosquitto"]
+addopts = "-q"

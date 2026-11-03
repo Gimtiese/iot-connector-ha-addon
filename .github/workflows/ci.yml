@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main, beta]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check iot-connector/app tests
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r iot-connector/app/requirements.txt pytest
+      - name: Unit-Tests (Allowlist, Puffer, Mapping)
+        run: env -u DATABASE_URL pytest tests/test_mapping.py tests/test_store.py
+      - name: Integrationstest gegen lokale Mosquitto-Container
+        run: env -u DATABASE_URL pytest tests/test_integration_mosquitto.py
+  build:
+    # Image-Build für beide Architekturen – kein Push, nur prüfen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - run: |
+          docker build \
+            --build-arg BUILD_FROM=ghcr.io/home-assistant/aarch64-base-python:3.12-alpine3.18 \
+            iot-connector
+      - run: |
+          docker build \
+            --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12-alpine3.18 \
+            -t addon-smoke:test \
+            iot-connector
+  smoke:
+    # Der Build-Job allein hätte nie gefunden, dass die App nie startet
+    # (Basis-Image hat nur ENTRYPOINT /init, kein CMD): hier läuft das Image echt.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          docker build \
+            --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12-alpine3.18 \
+            -t addon-smoke:test \
+            iot-connector
+      - name: Image starten und Ingress-UI / Log prüfen
+        run: |
+          docker run -d --name smoke -e SUPERVISOR_URL=http://localhost:8080 addon-smoke:test
+          sleep 15
+          set -o pipefail
+          docker logs smoke > /tmp/smoke.log 2>&1 || true
+          if ! curl -sf --max-time 10 http://$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' smoke):8099/ > /dev/null \
+             && ! grep -q "Lokaler Broker nicht verbindbar" /tmp/smoke.log; then
+            cat /tmp/smoke.log
+            echo "Add-on-App scheint nicht zu laufen: weder UI auf 8099 noch Broker-Retry im Log"
+            exit 1
+          fi
+          cat /tmp/smoke.log

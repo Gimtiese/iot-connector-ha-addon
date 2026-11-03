@@ -1,0 +1,4 @@
+# Add-on-Repository für Home Assistant (iot-connector#129, ADR 0001)
+name: Gimtiese IoT Connector
+url: https://github.com/Gimtiese/iot-connector-ha-addon
+maintainer: Gimtiese-Tech
