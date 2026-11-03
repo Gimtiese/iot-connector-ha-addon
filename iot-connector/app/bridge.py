@@ -55,6 +55,7 @@ class Bridge:
         import time
 
         try:
+            print(f"BRIDGE-DBG: on_message {msg.topic}", flush=True)
             if not is_allowed(msg.topic, self._filters):
                 return  # Allowlist: alles andere bleibt lokal
             self.messages_forwarded += 1

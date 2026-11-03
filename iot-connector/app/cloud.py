@@ -104,11 +104,13 @@ class CloudClient:
         # MQTT5-ReasonCode: 0 = Success (paho 2.1 hat kein reason_code.is_success)
         self.connected = getattr(reason_code, "value", 0) == 0
         if self.connected:
-            logger.info(
-                "Cloud verbunden, liefere %s gepufferte Nachrichten nach", self._store.count()
-            )
+            print(f"CLOUD-DBG: verbunden, replay von {self._store.count()}", flush=True)
             self._notify()
-            self.replay()
+            try:
+                self.replay()
+            except Exception as exc:
+                print(f"CLOUD-DBG: replay fehlgeschlagen: {exc!r}", flush=True)
+                raise
         else:
             logger.warning("Cloud verbindet nicht: %s", reason_code)
 
@@ -155,6 +157,7 @@ class CloudClient:
             retain=False,
             properties=self._ts_property(ts),
         )
+        print(f"CLOUD-DBG: publish_row mid={info.mid} rc={info.rc} topic={full}", flush=True)
         with self._pending_lock:
             self._pending[info.mid] = row_id
         self.last_publish = time.time()
@@ -164,8 +167,10 @@ class CloudClient:
         """Nachliefern: älteste Zeilen zuerst, in Batches, bis der Puffer leer ist."""
         from .mapping import cloud_topic, is_valid_topic
 
+        print(f"CLOUD-DBG: replay start, connected={self.connected}", flush=True)
         while self.connected:
             batch = self._store.next_batch(500)
+            print(f"CLOUD-DBG: batch {len(batch)}", flush=True)
             if not batch:
                 return
             for row_id, topic, payload, ts in batch:
@@ -184,6 +189,7 @@ class CloudClient:
                 )
                 with self._pending_lock:
                     self._pending[info.mid] = row_id
+                print(f"CLOUD-DBG: published mid={info.mid} rc={info.rc}", flush=True)
             self.last_publish = time.time()
             # PUBACKs laufen im Netzwerk-Thread; kurzes Felder vermeidet Busy-Loop
             time.sleep(0.05)

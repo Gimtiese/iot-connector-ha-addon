@@ -153,9 +153,11 @@ def _local_bridge(local_tcp: int, cloud, store, filters) -> mqtt.Client:
     bridge.start()  # setzt on_message
     _DBG.append(("bridge-made", local_tcp))
     # on_connect VOR connect: sonst verpasst der Client den CONNACK (kein Subscribe)
-    local.on_connect = lambda c, u, f, r, p=None: [
-        c.subscribe(f, qos=1) for f in filters
-    ]
+    def _dbg_on_connect(c, u, f, r, p=None):
+        print(f"BRIDGE-DBG: on_connect {r}", flush=True)
+        for f in filters:
+            c.subscribe(f, qos=1)
+    local.on_connect = _dbg_on_connect
     local.connect("127.0.0.1", local_tcp, 30)
     local.loop_start()
     return local
