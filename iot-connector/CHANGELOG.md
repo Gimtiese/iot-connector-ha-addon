@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.2 (2026-11-03)
+
+Fix: Claim-Code wird nicht angenommen – Fehlermeldungen unterscheiden jetzt die Ursache (iot-connector-ha-addon#9).
+
+- **Ursache gegen die Produktion geprüft:** Der Endpunkt ist erreichbar und gesund (`/health` ok, 422-Schemaprüfung ok, DynSec konfiguriert – ein ungültiger Code liefert 400 statt 503). „Code ungültig oder abgelaufen." ist also die echte Backend-Antwort: Der Code war abgelaufen (TTL 15 Minuten) oder schon einmal eingelöst (Codes sind nur einmal gültig) – gepaart mit dem Rate-Limit (5/min pro IP), das weitere Versuche für ~1 Minute blockt
+- **Fehler-Mapping:** `claim_gateway()` übersetzt jetzt den HTTP-Status in eigene Meldungen – 400 (ungültig/abgelaufen, mit Hinweis TTL/einmalig), 429 (Rate-Limit), 503 (MQTT-Zugänge nicht konfiguriert), 502 (Broker abgelehnt), 422 (Schemafehler) und 5xx (Serverfehler). Vorher stand für jeden HTTP-Fehler pauschal „Code ungültig oder abgelaufen."
+- **Backend-`detail` durchreichen:** Der Text aus der Backend-Antwort steht in der UI und im Add-on-Log (`Claim fehlgeschlagen: HTTP <status> <detail>`)
+- **Code normalisieren:** Leerzeichen, Bindestriche und Groß-/Kleinschreibung werden vor dem Senden vereinheitlicht (wie das Backend)
+- **Tests:** `tests/test_claim_errors.py` deckt das Status-Mapping (400/429/503/422/500) und die Normalisierung ab
+
 ## 1.1.1 (2026-11-03)
 
 Fix: Add-on erscheint nach dem Hinzufügen des Repos nicht im HA-Store (iot-connector-ha-addon#5).
