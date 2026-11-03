@@ -145,7 +145,8 @@ def _publisher(port: int) -> mqtt.Client:
 
 def _local_bridge(local_tcp: int, cloud, store, filters) -> mqtt.Client:
     local = make_local_client("127.0.0.1", local_tcp, None, None)
-    Bridge(local, cloud, filters, store)
+    bridge = Bridge(local, cloud, filters, store)
+    bridge.start()  # setzt on_message
     # on_connect VOR connect: sonst verpasst der Client den CONNACK (kein Subscribe)
     local.on_connect = lambda c, u, f, r, p=None: [
         c.subscribe(f, qos=1) for f in filters
