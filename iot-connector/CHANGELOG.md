@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.4 (2026-11-03)
+
+Fix: Nach einem Add-on-Neustart „Cloud verbunden“, das Gateway im IoT-Connector aber offline – neue Nachrichten kamen im Ingest nie an (iot-connector-ha-addon#13).
+
+- **Ursache (nachgestellt aus dem Protokoll, Gateway „Test“ `2er7cah9x1`):** Seit 1.1.3 startet die Cloud-Verbindung VOR der Supervisor-Zugriff/Bridge (Idempotenz-Fix aus #11). `_start_cloud()` hängt die Cloud aber nur an eine bereits existierende Bridge (``if self.bridge``) – beim Neustart startet ``Runtime.start()`` die Cloud zuerst, die Bridge wird danach mit ``cloud=None`` erzeugt. Damit blieb ``bridge.cloud`` dauerhaft `None`: Neue lokale Nachrichten wurden nur gepuffert, nie an die Cloud gesendet. Deshalb genau einmal „liefere 61 gepufferte Nachrichten nach“ (Drain des Altbestands) und danach keine Bridge-Protokolleinträge mehr – der Ingest sah keine Nachrichten, `last_seen_at` altert nicht, das Gateway steht auf offline. Backend nicht betroffen: Der Drain des Altbestands kam durch (CONNACK ok, 61 Zeilen geliefert), Quotas/ACLs verwerfen nichts
+- **Fix:** ``Runtime.start()`` hängt die bereits laufende Cloud nach dem Bridge-Aufbau an die Bridge (``attach_cloud``) – Reihenfolge Cloud-vor-Supervisor bleibt erhalten. Sichert auch den Claim-vor-Bridge-Fall
+- **SQLite-Race in ``store.py``:** ``count()`` und ``oldest_ts()`` lasen ohne ``self._lock`` über dieselbe Verbindung (``check_same_thread=False``) aus paho-Thread, Drain-Thread und Web-UI – ``fetchone()`` kann dabei `None` liefern → `TypeError` in ``main.py`` Status und ``bridge.py`` `_on_local_message` (im Protokoll 14:42:01 und 12:33, dabei ging eine Weiterleitung verloren). Beide Lesemethoden nehmen jetzt das Lock; ``add()`` nutzt intern ``_count_locked()`` (Lock nicht reentrant)
+- **UI ehrlich bei „Cloud verbunden“ (#13):** Grün zeigt jetzt „verbunden, letzte Übertragung vor X s“ – nur, wenn tatsächlich ein Publish bestätigt wurde (``last_publish``). Ohne Bestätigung steht „verbunden – noch keine Übertragung bestätigt (Puffer aktiv)“. Steigt der Pufferstand zwischen zwei Polls (alle 5 s), markiert die Zeile das rot („⚠ steigt“) – vorher suggerierte „Cloud verbunden“ bei steigendem Puffer, alles liefe
+- **Tests:** `tests/test_restart_live_forward.py` deckt den Akzeptanzfall ab: Neustart mit vorhandener `gateway.json` → Live-Nachricht → Publish an die Cloud (Zeile bleibt bis PUBACK im Puffer), Bridge hält die vor Start laufende Cloud, Claim-vor-Bridge-Fall. `tests/test_store.py` erweitert um paralleles `add`/`count`/`remove` (4 Threads schreiben, 3 lesen, danach 4 Remover parallel) – kein `TypeError`, Endzustand deterministisch
+
 ## 1.1.3 (2026-11-03)
 
 Fix: Nach dem Update auf 1.1.2 „Cloud getrennt“ ohne Ausweg – Claim verweigert mit „Bereits verknüpft“ (iot-connector-ha-addon#11).

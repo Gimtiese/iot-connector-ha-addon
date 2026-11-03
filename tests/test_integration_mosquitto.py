@@ -184,13 +184,21 @@ class TestEndeZuEnde:
         local = _local_bridge(brokers["local_tcp"], cloud, store, ["zigbee2mqtt/#"])
 
         pub = _publisher(brokers["local_tcp"])
-        pub.publish("zigbee2mqtt/sensor1", b"24.5", qos=1)
-
+        # Erst wenn alle drei Sessions stehen (Cloud-CONNACK, Bridge-Subscribe,
+        # Ingest-Subscribe), sonst geht das PUBLISH im Startup-Race verloren:
+        # mosquitto verwirft eine QoS-1-Nachricht ohne Abonnenten. Solange nichts
+        # ankommt, wird neu publiziert (at-least-once, bis zum CONNACK-Sichtkontakt).
         assert _wait_for(
-            lambda: any(
-                t == "d/gw-test/zigbee2mqtt/sensor1" and p == b"24.5" for t, p in received
-            )
-        ), f"Nichts in der Cloud angekommen: {received}"
+            lambda: cloud.connected and local.is_connected() and cloud_sub.is_connected(),
+            timeout_s=20,
+        ), "Sessions nicht bereit: cloud/local/ingest"
+        deadline = time.time() + 20
+        while not any(
+            t == "d/gw-test/zigbee2mqtt/sensor1" and p == b"24.5" for t, p in received
+        ):
+            assert time.time() < deadline, f"Nichts in der Cloud angekommen: {received}"
+            pub.publish("zigbee2mqtt/sensor1", b"24.5", qos=1)
+            time.sleep(0.3)
 
         pub.loop_stop()
         pub.disconnect()

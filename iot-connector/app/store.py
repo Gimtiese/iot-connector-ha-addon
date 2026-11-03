@@ -51,7 +51,9 @@ class MessageStore:
                 (topic, sqlite3.Binary(payload), ts if ts is not None else now, now),
             )
             row_id = int(cur.lastrowid)
-            excess = self.count() - self._max
+            # ``_count_locked`` statt ``count``: Lock ist hier schon gehalten
+            # (threading.Lock ist nicht reentrant).
+            excess = self._count_locked() - self._max
             if excess > 0:
                 self._db.execute(
                     "DELETE FROM buffer WHERE id IN "
@@ -62,9 +64,17 @@ class MessageStore:
             self._db.commit()
         return row_id
 
-    def count(self) -> int:
+    def _count_locked(self) -> int:
+        """``COUNT(*)`` – nur mit gehaltenem ``self._lock`` aufrufen."""
         row = self._db.execute("SELECT COUNT(*) FROM buffer").fetchone()
-        return int(row[0])
+        return int(row[0]) if row is not None else 0
+
+    def count(self) -> int:
+        # Lock: Ohne ihn laufen paho-Thread, Drain-Thread und Web-UI über
+        # dieselbe Verbindung (``check_same_thread=False``) und ``fetchone``
+        # kann None liefern → TypeError (iot-connector-ha-addon#13).
+        with self._lock:
+            return self._count_locked()
 
     def dropped(self) -> int:
         return self._dropped
@@ -86,8 +96,11 @@ class MessageStore:
             self._db.commit()
 
     def oldest_ts(self) -> float | None:
-        row = self._db.execute("SELECT MIN(created_at) FROM buffer").fetchone()
-        return float(row[0]) if row and row[0] is not None else None
+        # Lock wie bei ``count`` (#13): gleichzeitige Zugriffe auf derselben
+        # Verbindung sind der gemeldete TypeError.
+        with self._lock:
+            row = self._db.execute("SELECT MIN(created_at) FROM buffer").fetchone()
+            return float(row[0]) if row and row[0] is not None else None
 
     def close(self) -> None:
         with self._lock:
