@@ -35,11 +35,11 @@ jobs:
           time.sleep(1)
           print("AFTER CONNECT events:", events, "is_connected:", sub.is_connected(), flush=True)
 
-          pub = mqtt.Client(CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv5, client_id="pub-test")
+          pub = mqtt.Client(CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv5, client_id="")
           pub.connect("127.0.0.1", 18884, 30)
           pub.loop_start()
           time.sleep(0.5)
-          info = pub.publish("zigbee2mqtt/sensor1", b"24.5", qos=1)
+          info = pub.publish("zigbee2mqtt/sensor2", b"24.5", qos=1)
           info.wait_for_publish(timeout=10)
           print("published rc:", info.rc, flush=True)
           deadline = time.time() + 5
