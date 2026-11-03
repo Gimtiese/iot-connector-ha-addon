@@ -26,8 +26,8 @@ from .rate_limit import TokenBucket
 
 KEEPALIVE_S = 30
 # Nachliefern: Batch-Größe begrenzt nur die SQLite-Lesemenge. Die tatsächliche
-# Senderate regelt der Token-Bucket (iot-connector-ha-addon#15): 3000 msg/min
-# im Tenant-Ingest sind 50/s, Standard 40/s inklusive Live-Verkehr.
+# Senderate regelt der Token-Bucket (iot-connector-ha-addon#15/#17): 6000 msg/min
+# im Tenant-Ingest des Hofs sind 100/s, Standard 80/s inklusive Live-Verkehr.
 DRAIN_BATCH = 200
 DRAIN_IDLE_S = 0.2
 # Live-Nachrichten bekommen Vorrang: der Drain lässt einen Token Reserve und
