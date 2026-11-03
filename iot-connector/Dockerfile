@@ -8,10 +8,11 @@ COPY rootfs/ /
 RUN chmod a+x /run.sh
 
 WORKDIR /app
-COPY app/requirements.txt /app/requirements.txt
-RUN pip3 install --no-cache-dir -r /app/requirements.txt
+# App als Paket nach /app/app – run.sh führt `python3 -m app.main` aus /app aus
+COPY app/requirements.txt /app/app/requirements.txt
+RUN pip3 install --no-cache-dir -r /app/app/requirements.txt
 
-COPY app/ /app/
+COPY app/ /app/app/
 
 # HAOS startet das Basis-Image nur mit ENTRYPOINT /init (s6-overlay v3) –
 # ohne CMD würde die App nie gestartet (init: false, kein s6-Dienst).
