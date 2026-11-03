@@ -15,10 +15,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install voluptuous PyYAML awesomeversion ciso8601 atomicwrites docker pycares aiodns aiohttp
       - run: |
           git clone --depth 1 --branch 2025.06.0 \
             https://github.com/home-assistant/supervisor /tmp/supervisor
+          pip install $(grep -v '^faust-cchardet' /tmp/supervisor/requirements.txt)
           python scripts/validate_addon_schema.py /tmp/supervisor
   lint:
     runs-on: ubuntu-latest
