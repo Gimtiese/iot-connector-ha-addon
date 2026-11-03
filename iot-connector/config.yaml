@@ -1,6 +1,6 @@
 # HAOS-Add-on: lokalen Mosquitto nur lesend in den IoT-Connector spiegeln (iot-connector#129, ADR 0001)
 name: IoT Connector Bridge
-version: "1.0.0"
+version: "1.1.0"
 slug: iot_connector_bridge
 description: >-
   Spiegelt Topics des lokalen Mosquitto nur lesend in den IoT-Connector
@@ -30,11 +30,9 @@ init: false
 # /data ist immer gemappt (Zugangsdaten, SQLite-Puffer, Status) –
 # weitere map:-Einträge brauchen wir nicht, das Add-on soll minimal berechtigt sein.
 options:
-  # MQTT-Filter (Wildcards wie in MQTT) – nur diese Topics werden abonniert
-  topic_filters:
-    - "zigbee2mqtt/#"
-    - "shellies/#"
-  # homeassistant/# ist standardmäßig aus – Discovery-Metadata folgen separat (#36)
+  # MQTT-Filter (Wildcards wie in MQTT) – optional. Leer oder nicht gesetzt:
+  # alle Topics werden gespiegelt (inkl. homeassistant/#; $SYS/# bleibt außen vor).
+  topic_filters: []
   # Store-and-Forward: Puffergröße in Nachrichten. Mehr: älteste werden verworfen
   buffer_max_messages: 50000
   # Cloud (Übersteuerung nur für Tests – Default kommt aus dem Claim)
