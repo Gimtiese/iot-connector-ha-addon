@@ -32,6 +32,7 @@ class _Backend(BaseHTTPRequestHandler):
         state["seen_code"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))[
             "code"
         ]
+        state["seen_ua"] = self.headers.get("User-Agent")
 
 
 @pytest.fixture()
@@ -71,6 +72,16 @@ class TestClaimMapping:
         backend.state = {"status": 200, "body": {"gateway": {}}}  # type: ignore[attr-defined]
         claim_gateway(_url(backend), " ab-cd 23 45 ")
         assert backend.state["seen_code"] == "ABCD2345"  # type: ignore[attr-defined]
+
+    def test_eigener_user_agent(self, backend) -> None:
+        """Cloudflare blockt Default-UA 'Python-urllib/x' mit 403 (#9) – echte Ursache."""
+        backend.state = {"status": 200, "body": {"gateway": {}}}  # type: ignore[attr-defined]
+        claim_gateway(_url(backend), "ABCD2345")
+        assert backend.state["seen_ua"].startswith("IoTConnectorBridge/")  # type: ignore[attr-defined]
+
+    def test_403_cloudflare_block(self, backend) -> None:
+        msg = _fail(backend, 403, {"detail": "banned"})
+        assert "Cloudflare" in msg
 
     def test_400_ungueltig(self, backend) -> None:
         msg = _fail(backend, 400, {"detail": "Code ungültig oder abgelaufen."})

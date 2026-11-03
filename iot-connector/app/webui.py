@@ -13,6 +13,8 @@ from aiohttp import web
 
 logger = logging.getLogger(__name__)
 
+_ADDON_VERSION = "1.1.2"
+
 _PAGE = """<!doctype html>
 <html lang="de"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -152,6 +154,8 @@ def _claim_http_error(exc: urllib.error.HTTPError) -> ClaimError:
     logger.warning("Claim fehlgeschlagen: HTTP %s %s", status, detail or exc.reason)
     if status == 400:
         msg = "Code ungültig oder abgelaufen. Codes gelten 15 Minuten und nur einmal – ggf. im IoT-Connector neu erzeugen."
+    elif status == 403:
+        msg = "Vom Cloudflare-Schutz geblockt (403) – bitte dem Support melden."
     elif status == 429:
         msg = "Zu viele Versuche – der Server erlaubt 5 Versuche pro Minute. Bitte ~1 Minute warten und erneut versuchen."
     elif status == 503:
@@ -174,7 +178,12 @@ def claim_gateway(backend_url: str, code: str) -> dict:
     req = urllib.request.Request(
         url,
         data=json.dumps({"code": code}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            # Cloudflare blockt den Default-UA "Python-urllib/x" mit 403 (error 1010) –
+            # das Add-on kommt sonst nie bis zum Backend (#9, echte Ursache des Reports)
+            "User-Agent": f"IoTConnectorBridge/{_ADDON_VERSION}",
+        },
         method="POST",
     )
     try:
