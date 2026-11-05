@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.6 (2026-11-03)
+
+Anpassung an die neuen Tenant-Limits des Hofs (iot-connector#425, iot-connector-ha-addon#17).
+
+- **Standard-Senderate 80/s:** `max_send_rate` steht jetzt auf **80 Nachrichten/s** (vorher 40/s). Das Hof-Limit im Tenant-Ingest steigt auf 6.000 Nachrichten/min = 100/s; 80/s sind 80 % davon und lassen Luft für Live-Verkehr. Die Option bleibt konfigurierbar (`float(1,1000)`) und übersteuert den Default weiterhin.
+- **Doku:** `DOCS.md` und `config.yaml` nennen das neue Limit; Changelog der Version 1.1.6.
+
 ## 1.1.5 (2026-11-03)
 
 Fix: Nachliefern sprengte das Tenant-Ratenlimit, der Backend-Ingest verwarf still nach dem PUBACK (iot-connector-ha-addon#15).

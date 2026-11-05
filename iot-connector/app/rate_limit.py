@@ -1,9 +1,9 @@
 """Token-Bucket für die Senderate zum Cloud-Broker (iot-connector-ha-addon#15).
 
-Der Tenant-Ingest im IoT-Connector verwirft Nachrichten oberhalb von
-3000 Nachrichten/Minute (50/s) still nach dem PUBACK. Beim Nachliefern eines
-großen Puffers darf das Add-on diese Grenze deshalb nicht reißen. Live- und
-Nachliefer-Verkehr teilen sich ein Budget; Nachliefern lässt einen Token
+Der Tenant-Ingest im IoT-Connector verwirft Nachrichten oberhalb des
+Tenant-Limits still nach dem PUBACK (Hof: 6000/min = 100/s). Beim Nachliefern
+eines großen Puffers darf das Add-on diese Grenze deshalb nicht reißen. Live-
+und Nachliefer-Verkehr teilen sich ein Budget; Nachliefern lässt einen Token
 Reserve, damit Live-Nachrichten nicht dahinter verhungern.
 """
 

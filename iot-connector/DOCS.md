@@ -35,7 +35,7 @@ Dann „IoT Connector Bridge" installieren und starten. Voraussetzungen:
 | --- | --- | --- |
 | `topic_filters` | `[]` (alles) | Optionaler MQTT-Filter. Leer oder nicht gesetzt: **alle** Topics werden abonniert und gespiegelt (inkl. `homeassistant/#`). Ist die Liste nicht leer, gilt sie als Allowlist. |
 | `buffer_max_messages` | `50000` | Puffergrenze (Store-and-Forward). Mehr Nachrichten: die ältesten werden verworfen, das Add-on stürzt nicht ab |
-| `max_send_rate` | `40.0` | Senderate zum Cloud-Broker in Nachrichten/Sekunde (Live + Nachliefern gemeinsam). Der Tenant-Ingest erlaubt 3000/min = 50/s; 40/s lässt Luft. Bei größeren Tenants/Limits anheben |
+| `max_send_rate` | `80.0` | Senderate zum Cloud-Broker in Nachrichten/Sekunde (Live + Nachliefern gemeinsam). Der Tenant-Ingest des Hofs erlaubt 6000/min = 100/s; 80/s lässt Luft. Bei größeren Tenants/Limits anheben |
 | `backend_url` | `https://iot-connector.gimtiese-tech.de` | Backend für den Claim (Übersteuerung nur für Tests) |
 | `cloud_broker_url` | `wss://iot-connector-mqtt.gimtiese-tech.de` | Cloud-Broker (Default, sofern der Claim keine URL liefert) |
 
@@ -66,7 +66,7 @@ explizit.
   inkl. `homeassistant/#` (Retained-Discovery).
 - **Retained beim Start:** Retained Messages (z. B. Discovery) landen beim
   Subscribe im Store-and-Forward-Puffer und werden über den Token-Bucket
-  gedrosselt nachgeliefert (Standard 40 Nachrichten/s, `max_send_rate`) – das
+  gedrosselt nachgeliefert (Standard 80 Nachrichten/s, `max_send_rate`) – das
   Tenant-Ratenlimit reißt nicht, Live-Nachrichten haben Vorrang.
 - **QoS 1 + Store-and-Forward:** Bei Verbindungsverlust zur Cloud puffert das
   Add-on in SQLite (`/data/buffer.sqlite`) und liefert nach – älteste zuerst,

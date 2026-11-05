@@ -14,9 +14,9 @@ DEFAULT_TOPIC_FILTERS = ["#"]
 LEGACY_DEFAULT_TOPIC_FILTERS = ["zigbee2mqtt/#", "shellies/#"]
 DEFAULT_BACKEND_URL = "https://iot-connector.gimtiese-tech.de"
 DEFAULT_CLOUD_BROKER_URL = "wss://iot-connector-mqtt.gimtiese-tech.de"
-# Tenant-Ingest: 3000 Nachrichten/Minute = 50/s. 40/s lässt 20 % Luft und
-# deckt Live-Verkehr mit ab (iot-connector-ha-addon#15).
-DEFAULT_MAX_SEND_RATE = 40.0
+# Tenant-Ingest des Hofs: 6000 Nachrichten/Minute = 100/s. 80/s lässt 20 %
+# Luft und deckt Live-Verkehr mit ab (iot-connector-ha-addon#17).
+DEFAULT_MAX_SEND_RATE = 80.0
 
 
 @dataclass(frozen=True)

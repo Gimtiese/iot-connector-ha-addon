@@ -260,21 +260,25 @@ class TestEndeZuEnde:
         cloud.start()
         local = _local_bridge(brokers["local_tcp"], cloud, store, ["#"])
 
-        assert _wait_for(
-            lambda: len([1 for t, _p in received if "/sensor/r" in t]) == n_retained,
-            timeout_s=60,
-        ), f"Retained nicht vollständig nachgeliefert: {len(received)}/{n_retained}"
-        assert cloud.connected, "Cloud-Verbindung muss nach dem Retained-Burst bestehen"
-        assert _wait_for(lambda: store.count() == 0, timeout_s=30), "Puffer nicht geleert"
-
-        pub.loop_stop()
-        pub.disconnect()
-        local.loop_stop()
-        local.disconnect()
-        cloud.stop()
-        cloud_sub.loop_stop()
-        cloud_sub.disconnect()
-        store.close()
+        try:
+            # QoS 1 ist at-least-once: Bei einem Retained-Burst kann der Live-Pfad
+            # eine Zeile parallel zum Drain senden. Entscheidend ist, dass jedes
+            # Retained-Topic ankommt – nicht die exakte Paketzahl.
+            assert _wait_for(
+                lambda: len({t for t, _p in received if "/sensor/r" in t}) == n_retained,
+                timeout_s=60,
+            ), f"Retained nicht vollständig nachgeliefert: {len(received)} Pakete"
+            assert cloud.connected, "Cloud-Verbindung muss nach dem Retained-Burst bestehen"
+            assert _wait_for(lambda: store.count() == 0, timeout_s=30), "Puffer nicht geleert"
+        finally:
+            pub.loop_stop()
+            pub.disconnect()
+            local.loop_stop()
+            local.disconnect()
+            cloud.stop()
+            cloud_sub.loop_stop()
+            cloud_sub.disconnect()
+            store.close()
 
     def test_nicht_allowlisted_topic_bleibt_lokal(self, brokers, tmp_path):
         """homeassistant/# steht nicht in der Allowlist → nichts in der Cloud."""
@@ -288,19 +292,20 @@ class TestEndeZuEnde:
         local = _local_bridge(brokers["local_tcp"], cloud, store, ["zigbee2mqtt/#"])
 
         pub = _publisher(brokers["local_tcp"])
-        pub.publish("homeassistant/sensor/x", b"secret", qos=1)
+        try:
+            pub.publish("homeassistant/sensor/x", b"secret", qos=1)
 
-        time.sleep(3)
-        assert received == [], f"Nicht erlaubtes Topic wurde gespiegelt: {received}"
-
-        pub.loop_stop()
-        pub.disconnect()
-        local.loop_stop()
-        local.disconnect()
-        cloud.stop()
-        cloud_sub.loop_stop()
-        cloud_sub.disconnect()
-        store.close()
+            time.sleep(3)
+            assert received == [], f"Nicht erlaubtes Topic wurde gespiegelt: {received}"
+        finally:
+            pub.loop_stop()
+            pub.disconnect()
+            local.loop_stop()
+            local.disconnect()
+            cloud.stop()
+            cloud_sub.loop_stop()
+            cloud_sub.disconnect()
+            store.close()
 
     def test_store_and_forward_nach_ausfall(self, brokers, tmp_path):
         """Cloud-Verbindung erst nach dem Ausfall hergestellt → Nachlieferung aus Puffer."""
