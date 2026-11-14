@@ -11,7 +11,7 @@ jobs:
     # Add-ons erscheinen sonst still nicht im HA-Store (iot-connector-ha-addon#5)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -25,7 +25,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -34,7 +34,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -47,7 +47,7 @@ jobs:
     # Image-Build für beide Architekturen – kein Push, nur prüfen
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - run: |
@@ -64,7 +64,7 @@ jobs:
     # (Basis-Image hat nur ENTRYPOINT /init, kein CMD): hier läuft das Image echt.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: |
           docker build \
             --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12-alpine3.18 \
