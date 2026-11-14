@@ -1,0 +1,39 @@
+# Monthly dependency updates, grouped per ecosystem so minor and patch bumps arrive
+# together and major bumps stay separate PRs.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      all-dependencies:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  - package-ecosystem: pip
+    directory: /iot-connector/app
+    schedule:
+      interval: monthly
+    groups:
+      all-dependencies:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  - package-ecosystem: docker
+    directory: /iot-connector
+    schedule:
+      interval: monthly
+    groups:
+      all-dependencies:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      all-dependencies:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
